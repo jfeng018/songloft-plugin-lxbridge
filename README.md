@@ -4,6 +4,16 @@ Songloft LxBridge（中文名：Songloft 洛雪音源桥）把洛雪自定义音
 
 > v0.5.0 起插件永久内部标识为 `neo-lxbridge`。后续版本即使更改显示名称，也不再更改该标识。
 
+## v1.3.1
+
+发布版本：`v1.3.1`。
+
+- 歌单导入新增洛雪 `.lxmc`、JSON、M3U/M3U8、CSV 和 TXT 文件入口，并统一分享链接、上传文件与连接服务布局；
+- 支持洛雪 `allData_v3` 完整备份和 `playListPart_v2` 单歌单备份，仅提取歌单歌曲，不读取设置、自定义音源和历史记录；
+- 下载时原平台没有可用音源或解析失败，可按歌名、歌手和时长安全匹配其他平台版本并自动切换；
+- 歌单预览与待导入列表统一歌曲选择，移除重复的批量下载入口；
+- 补充 Spotify、Apple Music、YouTube Music、Navidrome／Subsonic、Jellyfin／Emby 等后续兼容规划说明。
+
 ## v1.3.0
 
 发布版本：`v1.3.0`。
@@ -314,16 +324,16 @@ https://github.com/NeoHeee/songloft-plugin-lxbridge/blob/main/registry.json
 
 从 [Releases](https://github.com/NeoHeee/songloft-plugin-lxbridge/releases/latest) 下载：
 
-- `neo-lxbridge-v1.3.0.jsplugin.zip`：安装包
-- `neo-lxbridge-v1.3.0.jsplugin.zip.sha256`：SHA-256
-- `songloft-plugin-neo-lxbridge-v1.3.0-source.zip`：源码归档
+- `neo-lxbridge-v1.3.1.jsplugin.zip`：安装包
+- `neo-lxbridge-v1.3.1.jsplugin.zip.sha256`：SHA-256
+- `songloft-plugin-neo-lxbridge-v1.3.1-source.zip`：源码归档
 
-在 Songloft 插件管理页面上传 `neo-lxbridge-v1.3.0.jsplugin.zip`。不要解压安装包，也不要上传源码归档。
+在 Songloft 插件管理页面上传 `neo-lxbridge-v1.3.1.jsplugin.zip`。不要解压安装包，也不要上传源码归档。
 
 可选：下载 `.sha256` 文件并校验安装包完整性。在 Windows PowerShell 中运行：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\neo-lxbridge-v1.3.0.jsplugin.zip
+Get-FileHash -Algorithm SHA256 .\neo-lxbridge-v1.3.1.jsplugin.zip
 ```
 
 命令输出应与 `.sha256` 文件中的值一致。
@@ -411,7 +421,7 @@ npm run validate
 dist/neo-lxbridge.jsplugin.zip
 ```
 
-构建器按入口 `neo-lxbridge` 生成内部包名；Release 会将其发布为 `neo-lxbridge-v1.3.0.jsplugin.zip`。
+构建器按入口 `neo-lxbridge` 生成内部包名；Release 会将其发布为 `neo-lxbridge-v1.3.1.jsplugin.zip`。
 
 ## 安全与免责声明
 

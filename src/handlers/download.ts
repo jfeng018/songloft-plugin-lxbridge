@@ -9,6 +9,8 @@ import type { RuntimeManager } from '../engine/manager';
 import type { MusicInfo, PlatformId } from '../types';
 import { probeAudio } from './direct';
 import { localAudioFileStatus } from '../download/filesystem';
+import { matchScore, searchAcross } from './search';
+import type { ResolvedUrl } from '../types';
 
 interface DownloadRequest {
   song?: SearchSongItem;
@@ -25,6 +27,87 @@ interface BatchDownloadRequest {
   allow_downgrade?: boolean;
 }
 
+interface ResolvedDownloadItem {
+  item: SearchSongItem;
+  sourceData: Record<string, any>;
+  source: PlatformId;
+  resolved: ResolvedUrl;
+  fallbackMessage: string;
+}
+
+function isPlatform(value: unknown): value is PlatformId {
+  return ['kw', 'kg', 'tx', 'wy', 'mg'].includes(String(value));
+}
+
+const PLATFORM_NAMES: Record<PlatformId, string> = {
+  kw: '酷我', kg: '酷狗', tx: 'QQ 音乐', wy: '网易云', mg: '咪咕',
+};
+
+async function resolveDownloadItem(
+  runtimeManager: RuntimeManager,
+  item: SearchSongItem,
+  quality: string,
+  allowDowngrade: boolean,
+): Promise<ResolvedDownloadItem> {
+  const originalData = item.source_data || {};
+  const originalSource = String(originalData.platform || '') as PlatformId;
+  const originalSong = originalData.songInfo as MusicInfo | undefined;
+  if (!isPlatform(originalSource) || !originalSong) throw new Error('歌曲缺少有效 source_data');
+
+  let originalError = '';
+  if (runtimeManager.hasPlatform(originalSource)) {
+    try {
+      return {
+        item,
+        sourceData: originalData,
+        source: originalSource,
+        resolved: await runtimeManager.getMusicUrl(originalSource, originalSong, quality, allowDowngrade),
+        fallbackMessage: '',
+      };
+    } catch (error) {
+      originalError = String((error as Error)?.message || error);
+    }
+  } else {
+    originalError = `没有已启用且支持 ${originalSource} 的洛雪音源`;
+  }
+
+  const keyword = `${item.title || originalSong.name || ''} ${item.artist || originalSong.singer || ''}`.trim();
+  const duration = Number(item.duration || originalSong.duration || 0) || undefined;
+  const candidates = (await searchAcross(keyword, 1, 10, quality))
+    .filter(candidate => {
+      const platform = String(candidate.source_data?.platform || '');
+      return isPlatform(platform) && platform !== originalSource && runtimeManager.hasPlatform(platform);
+    })
+    .map(candidate => ({ candidate, score: matchScore(candidate, item.title || originalSong.name || '', item.artist || originalSong.singer || '', duration) }))
+    .filter(entry => entry.score >= 100)
+    .sort((a, b) => b.score - a.score);
+
+  const fallbackErrors: string[] = [];
+  for (const { candidate } of candidates.slice(0, 5)) {
+    const sourceData = candidate.source_data || {};
+    const source = String(sourceData.platform || '') as PlatformId;
+    const songInfo = sourceData.songInfo as MusicInfo | undefined;
+    if (!isPlatform(source) || !songInfo) continue;
+    try {
+      const resolved = await runtimeManager.getMusicUrl(source, songInfo, quality, allowDowngrade);
+      return {
+        item: candidate as SearchSongItem,
+        sourceData,
+        source,
+        resolved,
+        fallbackMessage: `原平台${PLATFORM_NAMES[originalSource]}不可用，已自动切换到${PLATFORM_NAMES[source]}`,
+      };
+    } catch (error) {
+      fallbackErrors.push(`${source}: ${String((error as Error)?.message || error)}`);
+    }
+  }
+
+  const fallbackDetail = candidates.length
+    ? fallbackErrors.length ? `；替代候选解析失败：${fallbackErrors.join('；')}` : '；没有可安全匹配的可用替代版本'
+    : '；没有找到歌名、歌手和时长匹配的其他平台版本';
+  throw new Error(`原平台解析失败：${originalError}${fallbackDetail}`);
+}
+
 export function downloadHandlers(manager: DownloadManager, runtimeManager: RuntimeManager): {
   create: (req: HTTPRequest) => Promise<HTTPResponse>;
   createBatch: (req: HTTPRequest) => Promise<HTTPResponse>;
@@ -39,17 +122,30 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
         const body = parseJSONBody<DownloadRequest>(req);
         if (!body.song || typeof body.song !== 'object') throw new Error('song 不能为空');
 
+        let selectedSong = body.song;
+        let fallbackMessage = '';
+        const originalSource = String(body.song.source_data?.platform || '') as PlatformId;
+        if (isPlatform(originalSource) && !runtimeManager.hasPlatform(originalSource)) {
+          const quality = String(body.song.source_data?.quality || '320k');
+          const selected = await resolveDownloadItem(runtimeManager, body.song, quality, body.song.source_data?.allow_downgrade !== false);
+          selectedSong = selected.item;
+          selectedSong.source_data.requested_quality = selected.resolved.requestedQuality || quality;
+          selectedSong.source_data.quality = selected.resolved.actualQuality || quality;
+          selectedSong.source_data.allow_downgrade = body.song.source_data?.allow_downgrade !== false;
+          fallbackMessage = selected.fallbackMessage;
+        }
+
         const upgradeSuffix = body.upgrade_meta?.source_song_id
           ? `:upgrade:${Number(body.upgrade_meta.source_song_id)}:${String(body.upgrade_meta.target_quality || 'quality')}`
           : '';
-        const created = await upsertSearchSongs([body.song], body.fetch_lyric !== false, upgradeSuffix);
+        const created = await upsertSearchSongs([selectedSong], body.fetch_lyric !== false, upgradeSuffix);
         const record = created[0];
         if (!record?.id) throw new Error('写入 Songloft 歌曲库失败');
 
         let current = await songloft.songs.getById(record.id);
         if (!current) throw new Error('无法读取已导入的歌曲记录');
         if (current.type === 'local' && await localAudioFileStatus(current.file_path) === 'missing') {
-          const recovered = await upsertSearchSongs([body.song], body.fetch_lyric !== false, `${upgradeSuffix}:missing-file-recovery:${Date.now()}`);
+          const recovered = await upsertSearchSongs([selectedSong], body.fetch_lyric !== false, `${upgradeSuffix}:missing-file-recovery:${Date.now()}`);
           current = recovered[0]?.id ? await songloft.songs.getById(recovered[0].id) : null;
           if (!current) throw new Error('本地文件已丢失，创建恢复下载记录失败');
         }
@@ -67,13 +163,14 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
         }
         const job = manager.enqueue(current, {
           ...(body.download_meta || {}),
-          source_id: String(body.song.source_data?.platform || '') || undefined,
+          source_id: String(selectedSong.source_data?.platform || '') || undefined,
           target_dir: selectedSettings.target_dir || undefined,
           path_template: selectedSettings.target_dir ? (body.upgrade_meta?.source_song_id ? '{title}-{artist}' : selectedSettings.path_template) : undefined,
           upgrade_source_song_id: Number(body.upgrade_meta?.source_song_id || 0) || undefined,
           upgrade_source_bitrate: Number(body.upgrade_meta?.source_bitrate || 0) || undefined,
           upgrade_target_quality: String(body.upgrade_meta?.target_quality || '') || undefined,
         });
+        if (fallbackMessage) manager.setResolvedSource(job.id, String(selectedSong.source_data?.platform || ''), fallbackMessage);
         return ok({ job });
       } catch (error) {
         return fail(errorMessage(error), 400);
@@ -101,12 +198,12 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
               const item = body.songs![index]; const job = jobs[index];
               try {
                 manager.setStage(job.id, 'resolving', 10, '正在解析播放地址');
-                const sourceData = item.source_data || {};
-                const source = String(sourceData.platform || '') as PlatformId;
-                const songInfo = sourceData.songInfo as MusicInfo | undefined;
-                if (!['kw','kg','tx','wy','mg'].includes(source) || !songInfo) throw new Error('歌曲缺少有效 source_data');
-                const quality = String(sourceData.quality || requestedQuality);
-                const resolved = await runtimeManager.getMusicUrl(source, songInfo, quality, allowDowngrade);
+                const quality = String(item.source_data?.quality || requestedQuality);
+                const selected = await resolveDownloadItem(runtimeManager, item, quality, allowDowngrade);
+                const resolvedItem = selected.item;
+                const sourceData = selected.sourceData;
+                const resolved = selected.resolved;
+                manager.setResolvedSource(job.id, selected.source, selected.fallbackMessage);
                 manager.setStage(job.id, 'resolving', 20, '正在探测文件信息');
                 let probe: { total_bytes: number | null; content_type: string } = { total_bytes: null, content_type: '' };
                 try { probe = await probeAudio(resolved.url, Object.fromEntries(Object.entries(resolved.headers || {}).map(([key,value]) => [key,String(value)]))); }
@@ -115,13 +212,13 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
                 sourceData.quality = resolved.actualQuality || quality;
                 sourceData.allow_downgrade = allowDowngrade;
                 manager.setStage(job.id, 'resolving', 28, '正在写入 Songloft 曲库');
-                const created = await upsertSearchSongs([item], true);
+                const created = await upsertSearchSongs([resolvedItem], true);
                 const record = created[0];
                 if (!record?.id) throw new Error('写入 Songloft 曲库失败');
                 let current = await songloft.songs.getById(record.id);
                 if (!current) throw new Error('无法读取已入库歌曲');
                 if (current.type === 'local' && await localAudioFileStatus(current.file_path) === 'missing') {
-                  const recovered = await upsertSearchSongs([item], true, `:missing-file-recovery:${Date.now()}:${index}`);
+                  const recovered = await upsertSearchSongs([resolvedItem], true, `:missing-file-recovery:${Date.now()}:${index}`);
                   current = recovered[0]?.id ? await songloft.songs.getById(recovered[0].id) : null;
                   if (!current) throw new Error('本地文件已丢失，创建恢复下载记录失败');
                 }

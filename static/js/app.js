@@ -54,6 +54,9 @@
     sharedPlaylistSource: '',
     sharedPlaylistTitle: '',
     sharedPlaylistTotal: 0,
+    playlistImportMode: 'link',
+    playlistImportFile: null,
+    playlistBackupLists: [],
     hotSearches: [],
     hotSearchSource: '',
     searchHistory: [],
@@ -778,6 +781,244 @@
     };
   }
 
+  function setPlaylistImportMode(mode) {
+    const normalized = ['link', 'file', 'service'].includes(mode) ? mode : 'link';
+    state.playlistImportMode = normalized;
+    document.querySelectorAll('[data-playlist-import-mode]').forEach(button => {
+      const active = button.dataset.playlistImportMode === normalized;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+    });
+    const panes = { link: 'playlistImportLink', file: 'playlistImportFile', service: 'playlistImportService' };
+    Object.entries(panes).forEach(([key, id]) => {
+      const pane = $(id);
+      pane.hidden = key !== normalized;
+      pane.classList.toggle('active', key === normalized);
+    });
+  }
+
+  function parseDelimitedLine(line) {
+    const value = String(line || '').trim().replace(/^\uFEFF/, '');
+    if (!value || value.startsWith('#')) return null;
+    const csv = value.match(/^(?:"([^"]*)"|([^,]*)),(?:"([^"]*)"|([^,]*))(?:,(?:"([^"]*)"|([^,]*)))?/);
+    if (csv) {
+      const title = String(csv[1] ?? csv[2] ?? '').trim();
+      const artist = String(csv[3] ?? csv[4] ?? '').trim();
+      const album = String(csv[5] ?? csv[6] ?? '').trim();
+      if (/^(歌曲|歌名|title|name)$/i.test(title) && /^(歌手|artist|singer)$/i.test(artist)) return null;
+      return title ? { title, artist, album } : null;
+    }
+    const fileName = value.split(/[\\/]/).pop().replace(/\.(?:mp3|flac|wav|m4a|aac|ogg|opus|wma)$/i, '');
+    const parts = fileName.split(/\s+(?:-|–|—)\s+/);
+    if (parts.length >= 2) return { artist: parts.shift().trim(), title: parts.join(' - ').trim(), album: '' };
+    return { title: fileName.trim(), artist: '', album: '' };
+  }
+
+  function parseTextPlaylist(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const rows = [];
+    let pending = null;
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (/^#EXTINF:/i.test(line)) {
+        const label = line.slice(line.indexOf(',') + 1);
+        pending = parseDelimitedLine(label);
+        continue;
+      }
+      if (!line || line.startsWith('#')) continue;
+      if (pending) {
+        rows.push(pending);
+        pending = null;
+        continue;
+      }
+      const parsed = parseDelimitedLine(line);
+      if (parsed) rows.push(parsed);
+    }
+    if (pending) rows.push(pending);
+    return rows;
+  }
+
+  function collectJsonPlaylist(value, result = [], seen = new Set()) {
+    if (!value || typeof value !== 'object' || seen.has(value)) return result;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      value.forEach(item => collectJsonPlaylist(item, result, seen));
+      return result;
+    }
+    const sourceData = value.source_data && typeof value.source_data === 'object' ? value.source_data : null;
+    const songInfo = sourceData?.songInfo && typeof sourceData.songInfo === 'object' ? sourceData.songInfo : value;
+    const source = String(sourceData?.platform || value.source || songInfo.source || '');
+    const title = String(value.title || value.name || value.songName || songInfo.name || '').trim();
+    const artist = browseArtist(value.artist || value.singer || value.artists || songInfo.singer || '').trim();
+    const hasChildLists = ['list', 'tracks', 'songs', 'defaultList', 'loveList', 'userList', 'tempList'].some(key => Array.isArray(value[key]));
+    const looksLikeSong = !hasChildLists && title && (artist || source || value.interval != null || value.duration != null || value.meta || sourceData);
+    if (looksLikeSong) {
+      if (['kw', 'kg', 'tx', 'wy', 'mg'].includes(source)) {
+        result.push(normalizeBrowseSong({ ...songInfo, name: title, singer: artist, albumName: value.album || songInfo.albumName }, source));
+      } else {
+        result.push({ title, artist, album: String(value.album || value.albumName || ''), duration: Number(value.duration || 0) });
+      }
+      return result;
+    }
+    Object.values(value).forEach(item => collectJsonPlaylist(item, result, seen));
+    return result;
+  }
+
+  async function readPlaylistFile(file) {
+    if (typeof file.text === 'function') return file.text();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('文件读取失败'));
+      reader.readAsText(file);
+    });
+  }
+
+  async function readPlaylistFileBase64(file) {
+    const buffer = typeof file.arrayBuffer === 'function' ? await file.arrayBuffer() : await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('文件读取失败'));
+      reader.readAsArrayBuffer(file);
+    });
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+    }
+    return btoa(binary);
+  }
+
+  function showImportedPlaylist(playlist, fileName) {
+    const rows = (playlist?.songs || []).map(song => normalizeBrowseSong(song, song.source));
+    state.sharedPlaylistSource = '洛雪备份';
+    state.sharedPlaylistTitle = playlist?.name || fileName.replace(/\.[^.]+$/, '') || '导入歌单';
+    state.sharedPlaylistTotal = rows.length;
+    state.sharedPlaylistSongs = rows;
+    $('sharedPlaylistTitle').textContent = state.sharedPlaylistTitle;
+    $('sharedPlaylistCover').textContent = 'LX';
+    $('sharedPlaylistSearch').value = '';
+    $('sharedPlaylistResult').classList.remove('hidden');
+    if (!$('playlistName').value) $('playlistName').value = state.sharedPlaylistTitle;
+    renderSharedPlaylistSongs();
+  }
+
+  function renderBackupPlaylistPicker(fileName, backupType) {
+    const lists = state.playlistBackupLists;
+    $('playlistBackupPicker').classList.toggle('hidden', lists.length <= 1);
+    $('playlistBackupMeta').textContent = `${lists.length} 个含歌曲歌单 · ${lists.reduce((sum, item) => sum + item.songs.length, 0)} 首 · ${backupType}`;
+    $('playlistBackupSelect').innerHTML = lists.map((item, index) => `<option value="${index}">${escapeHtml(item.name)}（${item.songs.length} 首）</option>`).join('');
+    if (lists[0]) showImportedPlaylist(lists[0], fileName);
+  }
+
+  function importedMatchScore(candidate, row) {
+    const clean = value => String(value || '').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+    const candidateTitle = clean(candidate.title);
+    const candidateArtist = clean(candidate.artist);
+    const title = clean(row.title);
+    const artist = clean(row.artist);
+    let score = candidateTitle === title ? 100 : candidateTitle.includes(title) || title.includes(candidateTitle) ? 60 : 0;
+    if (artist) score += candidateArtist === artist ? 60 : candidateArtist.includes(artist) || artist.includes(candidateArtist) ? 35 : 0;
+    return score;
+  }
+
+  async function matchImportedPlaylistRows(rows, onProgress) {
+    const matched = [];
+    const failed = [];
+    let cursor = 0;
+    const unique = rows.filter((row, index, list) => row?.source_data || list.findIndex(item => `${item.title}|${item.artist}` === `${row.title}|${row.artist}`) === index).slice(0, 500);
+    const workers = Array.from({ length: Math.min(2, unique.length) }, async () => {
+      while (cursor < unique.length) {
+        const index = cursor++;
+        const row = unique[index];
+        if (row.source_data?.songInfo) matched[index] = row;
+        else {
+          try {
+            const resp = await request('/api/search', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ keyword: `${row.title || ''} ${row.artist || ''}`.trim(), quality: $('quality').value || defaultQuality(), source_id: 'all', page: 1, page_size: 10, allow_downgrade: allowAutoDowngrade() }),
+            });
+            const candidates = Array.isArray(resp.results) ? resp.results : [];
+            candidates.sort((a, b) => importedMatchScore(b, row) - importedMatchScore(a, row));
+            if (candidates[0]?.source_data?.songInfo) matched[index] = candidates[0];
+            else failed.push(row);
+          } catch { failed.push(row); }
+        }
+        onProgress?.(matched.filter(Boolean).length + failed.length, unique.length, failed.length);
+      }
+    });
+    await Promise.all(workers);
+    return { songs: matched.filter(Boolean), failed, total: unique.length, truncated: rows.length > 500 };
+  }
+
+  async function parsePlaylistFile() {
+    const file = state.playlistImportFile;
+    if (!file) return toast('请先选择歌单文件');
+    const button = $('parsePlaylistFile');
+    setBusy(button, true, '读取中');
+    $('sharedPlaylistResult').classList.add('hidden');
+    $('playlistBackupPicker').classList.add('hidden');
+    state.playlistBackupLists = [];
+    try {
+      const lowerName = file.name.toLowerCase();
+      if (/\.lxmc$/.test(lowerName)) {
+        if (file.size > 8 * 1024 * 1024) throw new Error('洛雪备份超过 8 MB 限制');
+        const resp = await request('/api/songlist/file', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content_base64: await readPlaylistFileBase64(file) }),
+        });
+        const parsed = resp.data || resp;
+        state.playlistBackupLists = Array.isArray(parsed.playlists) ? parsed.playlists : [];
+        if (!state.playlistBackupLists.length) throw new Error('洛雪备份中没有可导入歌单');
+        renderBackupPlaylistPicker(file.name, parsed.backup_type || '洛雪备份');
+        $('playlistFileState').textContent = `解析完成：只读取歌单数据，共 ${state.playlistBackupLists.length} 个歌单、${parsed.total_songs || 0} 首歌曲；设置、自定义音源和历史记录已忽略。`;
+        return;
+      }
+      const text = await readPlaylistFile(file);
+      let rows;
+      if (/\.json$/.test(lowerName) || /^[\s\uFEFF]*[\[{]/.test(text)) {
+        try { rows = collectJsonPlaylist(JSON.parse(text.replace(/^\uFEFF/, ''))); }
+        catch { throw new Error('无法读取该洛雪/JSON 备份；可能是加密备份、完整数据包或版本暂不兼容'); }
+      } else rows = parseTextPlaylist(text);
+      if (!rows.length) throw new Error('文件中没有识别到歌曲，请检查文件格式或内容');
+      $('playlistFileState').textContent = `已识别 ${rows.length} 条记录，正在匹配可用音源…`;
+      setBusy(button, true, '匹配中');
+      const result = await matchImportedPlaylistRows(rows, (done, total, failed) => {
+        $('playlistFileState').textContent = `正在匹配 ${done} / ${total}，暂有 ${failed} 首未匹配…`;
+      });
+      if (!result.songs.length) throw new Error(`已读取 ${result.total} 首，但没有匹配到可导入歌曲`);
+      state.sharedPlaylistSource = '导入文件';
+      state.sharedPlaylistTitle = file.name.replace(/\.[^.]+$/, '') || '导入歌单';
+      state.sharedPlaylistTotal = result.total;
+      state.sharedPlaylistSongs = result.songs;
+      $('sharedPlaylistTitle').textContent = state.sharedPlaylistTitle;
+      $('sharedPlaylistCover').textContent = '⇧';
+      $('sharedPlaylistSearch').value = '';
+      $('sharedPlaylistResult').classList.remove('hidden');
+      $('playlistFileState').textContent = `解析完成：匹配 ${result.songs.length} 首，未匹配 ${result.failed.length} 首${result.truncated ? '；文件超过 500 首，本次处理前 500 首' : ''}。`;
+      if (!$('playlistName').value) $('playlistName').value = state.sharedPlaylistTitle;
+      renderSharedPlaylistSongs();
+    } catch (error) {
+      state.sharedPlaylistSongs = [];
+      $('playlistFileState').textContent = `解析失败：${error.message}`;
+      toast(error.message, 6200);
+    } finally { setBusy(button, false); }
+  }
+
+  document.querySelectorAll('[data-playlist-import-mode]').forEach(button => button.addEventListener('click', () => setPlaylistImportMode(button.dataset.playlistImportMode)));
+  $('playlistFileInput').addEventListener('change', event => {
+    const file = event.target.files?.[0] || null;
+    state.playlistImportFile = file;
+    $('parsePlaylistFile').disabled = !file;
+    $('playlistFileName').textContent = file?.name || '尚未选择文件';
+    $('playlistFileMeta').textContent = file ? `${Math.max(1, Math.round(file.size / 1024))} KB · 仅用于本次解析，不会保存原始文件` : '洛雪备份由插件服务临时解压，不会保存原始文件。';
+  });
+  $('parsePlaylistFile').addEventListener('click', parsePlaylistFile);
+  $('playlistBackupSelect').addEventListener('change', event => {
+    const playlist = state.playlistBackupLists[Number(event.target.value)];
+    if (playlist && state.playlistImportFile) showImportedPlaylist(playlist, state.playlistImportFile.name);
+  });
+
   function filteredSharedPlaylistSongs() {
     const keyword = $('sharedPlaylistSearch').value.trim().toLocaleLowerCase();
     if (!keyword) return state.sharedPlaylistSongs.map((item, index) => ({ item, index }));
@@ -793,7 +1034,6 @@
     const selectedInPlaylist = state.sharedPlaylistSongs.filter(item => selected.has(selectedKey(item))).length;
     $('sharedPlaylistMeta').textContent = `已加载 ${state.sharedPlaylistSongs.length}${state.sharedPlaylistTotal > state.sharedPlaylistSongs.length ? ` / ${state.sharedPlaylistTotal}` : ''} 首 · 已选择 ${selectedInPlaylist} 首 · ${platformNames[state.sharedPlaylistSource] || state.sharedPlaylistSource}`;
     $('selectAllSharedPlaylist').textContent = filtered.length && filtered.every(({ item }) => selected.has(selectedKey(item))) ? '取消选择当前结果' : '全选当前结果';
-    $('downloadSharedSelection').disabled = selectedInPlaylist === 0;
     if (!filtered.length) {
       container.innerHTML = '<div class="empty-state compact-empty"><strong>没有匹配歌曲</strong><p>换一个筛选关键词再试试。</p></div>';
       return;
@@ -865,8 +1105,6 @@
     renderImport();
     renderResults();
   });
-  $('downloadSharedSelection').addEventListener('click', () => $('batchDownloadButton').click());
-
   function formatPlayCount(value) {
     const count = Number(value || 0);
     if (!count) return '';
@@ -1935,6 +2173,7 @@
             <span style="width:${Math.max(0, Math.min(100, Number(job.progress || 0)))}%"></span>
           </div>
           ${job.status_detail ? `<p class="download-stage-detail">${escapeHtml(job.status_detail)}</p>` : ''}
+          ${job.source_fallback_message ? `<p class="download-source-fallback">${escapeHtml(job.source_fallback_message)}</p>` : ''}
           ${errorDiagnostic}
           ${job.verification_message ? `<p class="${job.verification_status === 'passed' ? 'download-verification-passed' : 'download-verification-warning'}">${escapeHtml(job.verification_message)}</p>` : ''}
         </div>
@@ -2564,6 +2803,13 @@ curl -X POST "${endpoint}" \
     $('lxSyncState').textContent = settings?.enabled
       ? '同步服务已开启。请确保防火墙和反向代理允许 WebSocket 连接。'
       : '同步服务默认关闭，开启并保存后才接受 LX Music 连接。';
+    if ($('playlistLxServiceState')) {
+      const connected = Number(settings?.connectedCount || 0);
+      const mapped = Number(settings?.mappedPlaylists || 0);
+      $('playlistLxServiceState').textContent = settings?.enabled
+        ? `服务已开启 · ${connected} 台在线 · ${mapped} 个映射歌单`
+        : '尚未开启；进入洛雪互联完成连接设置';
+    }
   }
 
   async function loadLxSyncSettings() {
@@ -2573,6 +2819,7 @@ curl -X POST "${endpoint}" \
     } catch (error) {
       $('lxSyncState').textContent = `读取同步设置失败：${error.message}`;
       $('lxSyncState').classList.add('is-warning');
+      if ($('playlistLxServiceState')) $('playlistLxServiceState').textContent = `连接状态读取失败：${error.message}`;
     }
   }
 

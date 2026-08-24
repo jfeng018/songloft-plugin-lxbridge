@@ -23,6 +23,7 @@ export interface DownloadJob {
   status_detail?: string;
   client_key?: string;
   source_id?: string;
+  source_fallback_message?: string;
   path?: string;
   error?: string;
   error_category?: DownloadFailureCategory;
@@ -212,6 +213,16 @@ export class DownloadManager {
     if (!job) throw new Error('下载任务不存在或已过期');
     job.status = status; job.progress = Math.max(0, Math.min(100, progress));
     job.status_detail = detail; job.updated_at = Date.now();
+    this.schedulePersist();
+    return { ...job };
+  }
+
+  setResolvedSource(id: string, sourceId: string, fallbackMessage = ''): DownloadJob {
+    const job = this.jobs.get(id);
+    if (!job) throw new Error('下载任务不存在或已过期');
+    job.source_id = sourceId || job.source_id;
+    job.source_fallback_message = fallbackMessage || undefined;
+    job.updated_at = Date.now();
     this.schedulePersist();
     return { ...job };
   }

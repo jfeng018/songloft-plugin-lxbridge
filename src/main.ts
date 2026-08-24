@@ -20,6 +20,7 @@ import { handleLxSyncWebSocket } from './lx_sync/protocol_ws';
 import { LxSyncService } from './lx_sync/service';
 import { addSearchHistory, clearSearchHistory, getHotSearches, getSearchHistory, removeSearchHistory } from './search/discovery';
 import { loadSharedPlaylist } from './songlist/shared';
+import { parseLxmcBase64 } from './songlist/lxmc';
 import { runDiagnostics } from './handlers/diagnostics';
 
 const router = createRouter();
@@ -192,6 +193,14 @@ router.post('/api/songlist/shared', async (req) => {
   try {
     const body = parseJSONBody<{ url?: string }>(req);
     return jsonResponse({ code: 0, msg: 'success', data: await loadSharedPlaylist(body.url) });
+  } catch (error) {
+    return jsonResponse({ code: 400, msg: String((error as Error)?.message || error), data: null }, 400);
+  }
+});
+router.post('/api/songlist/file', async (req) => {
+  try {
+    const body = parseJSONBody<{ content_base64?: string }>(req);
+    return jsonResponse({ code: 0, msg: 'success', data: parseLxmcBase64(body.content_base64) });
   } catch (error) {
     return jsonResponse({ code: 400, msg: String((error as Error)?.message || error), data: null }, 400);
   }
