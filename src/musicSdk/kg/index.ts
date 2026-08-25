@@ -1,6 +1,7 @@
 import type { MusicPlatform, MusicInfo } from '../../types';
 import { httpFetch } from '../request';
 import { base64Decode } from '../crypto-shim';
+import { decodeKugouKrc } from '../../lyrics/wordLyric';
 import { arr, makeMusicInfo, normalizeCover, obj, page, staticSorts } from '../platform-common';
 
 const headers = { Referer: 'https://www.kugou.com/', 'User-Agent': 'Mozilla/5.0' };
@@ -63,9 +64,11 @@ async function getLyric(song:MusicInfo) {
   const searchResp=await httpFetch(`https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&hash=${encodeURIComponent(hash)}`,{headers}).promise;
   const candidates=arr(obj(searchResp.body).candidates); if(!candidates.length) return {lyric:'',raw:searchResp.body};
   const item=obj(candidates[0]);
-  const dl=await httpFetch(`https://lyrics.kugou.com/download?ver=1&client=pc&id=${encodeURIComponent(item.id)}&accesskey=${encodeURIComponent(item.accesskey)}&fmt=lrc&charset=utf8`,{headers}).promise;
+  const fmt=Number(item.krctype)===1&&Number(item.contenttype)!==1?'krc':'lrc';
+  const dl=await httpFetch(`https://lyrics.kugou.com/download?ver=1&client=pc&id=${encodeURIComponent(item.id)}&accesskey=${encodeURIComponent(item.accesskey)}&fmt=${fmt}&charset=utf8`,{headers}).promise;
   const content=String(obj(dl.body).content||'');
-  return {lyric: content ? base64Decode(content) : '', raw: dl.body};
+  if(fmt==='krc'&&content)return {...decodeKugouKrc(content),wordLyricSupported:true,raw:dl.body};
+  return {lyric: content ? base64Decode(content) : '',lxlyric:'',wordLyricSupported:true,raw: dl.body};
 }
 
 const kg:MusicPlatform={

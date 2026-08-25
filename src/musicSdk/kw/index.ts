@@ -59,7 +59,7 @@ async function getLyric(song: MusicInfo) {
     const m = Math.floor(t / 60); const s = (t % 60).toFixed(2).padStart(5, '0');
     return `[${String(m).padStart(2, '0')}:${s}]${String(x.lineLyric || x.line || '')}`;
   });
-  return { lyric: lines.join('\n'), raw: body };
+  return { lyric: lines.join('\n'), lxlyric: '', wordLyricSupported: false, raw: body };
 }
 
 const boards = [

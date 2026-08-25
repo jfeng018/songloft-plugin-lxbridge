@@ -15,6 +15,7 @@ import type { ResolvedLyrics } from '../lyrics/resolver';
 import { getLyricSettings } from '../lyrics/settings';
 import type { LyricPreferredSource } from '../lyrics/settings';
 import { getDownloadLyricSnapshot, saveDownloadLyricSnapshot } from '../lyrics/downloadStore';
+import type { WordLyricStatus } from '../lyrics/wordLyric';
 
 interface DownloadRequest {
   song?: SearchSongItem;
@@ -52,6 +53,7 @@ interface LyricPreviewData {
   lyric: string;
   tlyric: string;
   lxlyric: string;
+  word_lyric_status: WordLyricStatus;
 }
 
 function isPlatform(value: unknown): value is PlatformId {
@@ -171,6 +173,7 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
       lyric: stored?.lyric || String(lyrics.lyric || ''),
       tlyric: stored?.tlyric || String(lyrics.tlyric || ''),
       lxlyric: stored?.lxlyric || String(lyrics.lxlyric || ''),
+      word_lyric_status: stored?.wordLyricStatus || (stored?.lxlyric || lyrics.lxlyric ? 'available' : ['tx', 'kw', 'mg'].includes(String(job.lyric_source_id || stored?.source || lyrics.source || '')) ? 'unsupported' : 'unknown'),
     };
   }
 

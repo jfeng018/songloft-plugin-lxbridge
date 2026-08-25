@@ -40,7 +40,7 @@
           <div class="brand-copy">
             <div class="brand-row">
               <h1>Songloft LxBridge</h1>
-          <span class="version-badge">v1.4.0</span>
+          <span class="version-badge">v1.4.1</span>
             </div>
             <p>汇聚多平台音源 · 焕新私人音乐库</p>
           </div>
@@ -838,6 +838,7 @@
                   <option value="tx">优先 QQ 音乐</option>
                   <option value="wy">优先网易云</option>
                   <option value="mg">优先咪咕</option>
+                  <option value="lrclib">优先 LRCLIB</option>
                 </select>
               </div>
               <div class="field setting-select-card">
@@ -1179,24 +1180,21 @@
         <div id="lyricPreviewTabs" class="lyric-preview-tabs" role="tablist" aria-label="歌词类型"></div>
         <pre id="lyricPreviewContent" class="lyric-preview-content">正在读取歌词…</pre>
         <div class="modal-actions lyric-preview-actions">
-          <div class="row lyric-preview-retry-actions">
-            <label class="field lyric-retry-source" for="lyricRetrySource">
-              <span>本次歌词来源</span>
-              <select id="lyricRetrySource">
-                <option value="">按全局设置</option>
-                <option value="kw">酷我</option>
-                <option value="kg">酷狗</option>
-                <option value="tx">QQ 音乐</option>
-                <option value="wy">网易云</option>
-                <option value="mg">咪咕</option>
-              </select>
-            </label>
-            <button id="retryLyricPreview" class="secondary" type="button">重新获取歌词</button>
-          </div>
-          <div class="row lyric-preview-export-actions">
-            <button id="copyLyricPreview" class="secondary" type="button">复制当前歌词</button>
-            <button id="exportLyricPreview" class="primary" type="button">导出 LRC</button>
-          </div>
+          <label class="field lyric-retry-source" for="lyricRetrySource">
+            <span>本次歌词来源</span>
+            <select id="lyricRetrySource">
+              <option value="">按全局设置</option>
+              <option value="kw">酷我</option>
+              <option value="kg">酷狗</option>
+              <option value="tx">QQ 音乐</option>
+              <option value="wy">网易云</option>
+              <option value="mg">咪咕</option>
+              <option value="lrclib">LRCLIB</option>
+            </select>
+          </label>
+          <button id="retryLyricPreview" class="secondary" type="button">重新获取歌词</button>
+          <button id="copyLyricPreview" class="secondary" type="button">复制当前歌词</button>
+          <button id="exportLyricPreview" class="primary" type="button">导出 LRC</button>
         </div>
         <p class="muted lyric-export-note">导出的 LRC 保存到当前浏览器或设备的下载目录，不会自动写入 Songloft 音乐目录。</p>
       </div>

@@ -67,7 +67,7 @@
   const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[ch]));
-  const platformNames = { kw: '酷我', kg: '酷狗', tx: 'QQ 音乐', wy: '网易云', mg: '咪咕' };
+  const platformNames = { kw: '酷我', kg: '酷狗', tx: 'QQ 音乐', wy: '网易云', mg: '咪咕', lrclib: 'LRCLIB' };
   const qualityCatalog = [
     { value: '128k', label: '标准 · 128K', common: true },
     { value: '320k', label: '高品质 · 320K', common: true },
@@ -2139,13 +2139,20 @@
     const status = downloadLyricText({ lyric_status: data.status, lyric_source_id: data.source, lyric_message: data.message }).replace(/^歌词：/, '');
     $('lyricPreviewTitle').textContent = data.title ? `《${data.title}》歌词` : '查看歌词';
     $('lyricPreviewStatus').innerHTML = `<strong>${escapeHtml(data.title || '未知歌曲')}${data.artist ? ` · ${escapeHtml(data.artist)}` : ''}</strong><span>${escapeHtml(status || '尚无歌词状态')} · 来源：${escapeHtml(source)}${data.fallback ? ' · 跨平台补全' : ''}</span>`;
-    const tabs = [['written', '实际写入'], ['lyric', '原文'], ['tlyric', '翻译'], ['lxlyric', '逐字歌词']];
+    const wordStatus = data.word_lyric_status || (data.lxlyric ? 'available' : 'unknown');
+    const wordLabel = wordStatus === 'unsupported' ? '逐字歌词（暂不支持）' : wordStatus === 'not_found' ? '逐字歌词（该歌曲没有）' : '逐字歌词';
+    const tabs = [['written', '实际写入'], ['lyric', '原文'], ['tlyric', '翻译'], ['lxlyric', wordLabel]];
     $('lyricPreviewTabs').innerHTML = tabs.map(([kind, label]) => {
       const hasContent = Boolean(lyricPreviewValue(kind));
-      return `<button class="secondary${kind === lyricPreviewKind ? ' is-active' : ''}" type="button" role="tab" aria-selected="${kind === lyricPreviewKind}" data-lyric-kind="${kind}"${hasContent ? '' : ' disabled'}>${label}${hasContent ? '' : '（无）'}</button>`;
+      const emptySuffix = kind === 'lxlyric' && wordStatus === 'unsupported' ? '' : hasContent ? '' : '（无）';
+      return `<button class="secondary${kind === lyricPreviewKind ? ' is-active' : ''}" type="button" role="tab" aria-selected="${kind === lyricPreviewKind}" data-lyric-kind="${kind}"${hasContent ? '' : ' disabled'}>${label}${emptySuffix}</button>`;
     }).join('');
     const content = lyricPreviewValue(lyricPreviewKind);
-    $('lyricPreviewContent').textContent = content || '当前类型没有可显示的歌词。';
+    $('lyricPreviewContent').textContent = content || (lyricPreviewKind === 'lxlyric' && wordStatus === 'unsupported'
+      ? '当前歌词来源的适配器暂不支持逐字歌词，仅能获取普通歌词。'
+      : lyricPreviewKind === 'lxlyric' && wordStatus === 'not_found'
+        ? '该歌曲在当前歌词来源中没有返回逐字歌词。'
+        : '当前类型没有可显示的歌词。');
     $('lyricPreviewContent').classList.toggle('is-empty', !content);
     $('copyLyricPreview').disabled = !content;
     $('exportLyricPreview').disabled = !['written', 'lyric', 'tlyric', 'lxlyric'].some(kind => lyricPreviewValue(kind));

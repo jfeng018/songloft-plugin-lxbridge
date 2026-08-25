@@ -27,7 +27,7 @@ async function search(keyword:string,pageNo=1,limit=30){
   return page('tx',rows.map(x=>parseSong(obj(x))).filter(x=>x.name),pageNo,limit,Number(song.total||rows.length));
 }
 
-async function getLyric(song:MusicInfo){const mid=song.songmid||song.musicId;if(!mid)throw new Error('QQ音乐歌曲缺少 songmid');const {body}=await httpFetch(`https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(mid)}&format=json&nobase64=1&g_tk=5381`,{headers}).promise;const d=obj(body);return {lyric:String(d.lyric||''),tlyric:String(d.trans||d.trans_lrc||''),raw:body};}
+async function getLyric(song:MusicInfo){const mid=song.songmid||song.musicId;if(!mid)throw new Error('QQ音乐歌曲缺少 songmid');const {body}=await httpFetch(`https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(mid)}&format=json&nobase64=1&g_tk=5381`,{headers}).promise;const d=obj(body);return {lyric:String(d.lyric||''),tlyric:String(d.trans||d.trans_lrc||''),lxlyric:'',wordLyricSupported:false,raw:body};}
 
 const boards=[{id:'4',name:'流行指数榜'},{id:'26',name:'热歌榜'},{id:'27',name:'新歌榜'},{id:'62',name:'飙升榜'}];
 const tx:MusicPlatform={id:'tx',name:'QQ音乐',musicSearch:{search},getLyric,

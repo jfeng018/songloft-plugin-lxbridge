@@ -1,5 +1,5 @@
 export type LyricTranslationMode = 'merge' | 'original' | 'translation';
-export type LyricPreferredSource = 'auto' | 'kw' | 'kg' | 'tx' | 'wy' | 'mg';
+export type LyricPreferredSource = 'auto' | 'kw' | 'kg' | 'tx' | 'wy' | 'mg' | 'lrclib';
 
 export interface LyricSettings {
   auto_fetch: boolean;
@@ -29,7 +29,7 @@ function normalize(value: Partial<LyricSettings> | null | undefined): LyricSetti
     auto_fetch: value?.auto_fetch !== false,
     provider_enabled: value?.provider_enabled === true,
     fallback_enabled: value?.fallback_enabled !== false,
-    preferred_source: ['auto', 'kw', 'kg', 'tx', 'wy', 'mg'].includes(preferredSource) ? preferredSource as LyricPreferredSource : DEFAULTS.preferred_source,
+    preferred_source: ['auto', 'kw', 'kg', 'tx', 'wy', 'mg', 'lrclib'].includes(preferredSource) ? preferredSource as LyricPreferredSource : DEFAULTS.preferred_source,
     translation_mode: ['merge', 'original', 'translation'].includes(mode) ? mode as LyricTranslationMode : DEFAULTS.translation_mode,
     request_interval_ms: Math.max(300, Math.min(5000, Number.isFinite(interval) ? Math.round(interval) : DEFAULTS.request_interval_ms)),
   };

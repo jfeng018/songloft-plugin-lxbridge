@@ -5,11 +5,13 @@ const mocks = vi.hoisted(() => ({
   searchAcross: vi.fn(),
   matchScore: vi.fn(() => 150),
   getLyric: { kw: vi.fn(), kg: vi.fn(), tx: vi.fn(), wy: vi.fn(), mg: vi.fn() },
+  getLrclibLyrics: vi.fn(),
 }));
 
 vi.mock('../../src/lyrics/settings', () => ({ getLyricSettings: vi.fn(async () => mocks.settings) }));
 vi.mock('../../src/handlers/search', () => ({ searchAcross: mocks.searchAcross, matchScore: mocks.matchScore }));
 vi.mock('../../src/musicSdk/facade', () => ({ musicSdk: Object.fromEntries(Object.entries(mocks.getLyric).map(([key, getLyric]) => [key, { getLyric }])) }));
+vi.mock('../../src/lyrics/lrclib', () => ({ getLrclibLyrics: mocks.getLrclibLyrics }));
 
 import { clearLyricCache, mergeTranslatedLyric, resolveLyrics, resolveLyricsByMetadata } from '../../src/lyrics/resolver';
 
@@ -79,5 +81,16 @@ describe('歌词合并', () => {
     await expect(resolveLyricsByMetadata({ title: '原生测试', artist: '测试歌手', album: '测试专辑', duration: 200 })).resolves.toMatchObject({
       status: 'completed', source: 'tx', lyric: '[00:01.00]原生歌词',
     });
+  });
+
+  it('可以把 LRCLIB 作为独立首选来源', async () => {
+    Object.assign(mocks.settings, { preferred_source: 'lrclib', fallback_enabled: false });
+    mocks.getLrclibLyrics.mockResolvedValue({ lyric: '[00:01.00]LRCLIB 歌词', wordLyricSupported: false });
+    const result = await resolveLyrics({
+      title: '测试歌曲', artist: '测试歌手', album: '测试专辑', duration: 180,
+      source_data: { platform: 'wy', songInfo: { id: 'wy-lrclib', name: '测试歌曲', singer: '测试歌手', duration: 180 } },
+    });
+    expect(result).toMatchObject({ status: 'completed', source: 'lrclib', lyric: '[00:01.00]LRCLIB 歌词' });
+    expect(mocks.getLyric.wy).not.toHaveBeenCalled();
   });
 });

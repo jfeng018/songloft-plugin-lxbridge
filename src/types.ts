@@ -46,6 +46,7 @@ export interface LyricResult {
   lyric: string;
   tlyric?: string;
   lxlyric?: string;
+  wordLyricSupported?: boolean;
   raw?: unknown;
 }
 
