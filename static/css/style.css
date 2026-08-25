@@ -714,7 +714,7 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
 .playback-settings-row { grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(210px, .8fr)) auto; }
 .playback-settings-row > .setting-select-card,
 .playback-settings-row > .check-card { height: 92px; min-height: 92px; box-sizing: border-box; }
-.lyric-settings-row { display: grid; grid-template-columns: repeat(2, minmax(210px, 1fr)) repeat(2, minmax(170px, .72fr)) auto; gap: 14px; align-items: end; }
+.lyric-settings-row { display: grid; grid-template-columns: repeat(3, minmax(210px, 1fr)); gap: 14px; align-items: end; }
 .lyric-settings-row > .setting-select-card,
 .lyric-settings-row > .check-card { height: 92px; min-height: 92px; box-sizing: border-box; }
 .settings-save { min-width: 92px; }
@@ -739,11 +739,29 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
 .lyric-preview-content.is-empty { display: grid; place-items: center; color: var(--muted); font-family: inherit; }
 .lyric-preview-actions { justify-content: space-between; }
 .lyric-preview-export-actions { flex-wrap: wrap; }
+.lyric-preview-retry-actions { align-items: end; flex-wrap: wrap; }
+.lyric-retry-source { min-width: 190px; gap: 5px; }
+.lyric-retry-source > span { color: var(--muted); font-size: 11px; font-weight: 700; }
+.lyric-retry-source select { min-height: 38px; padding-block: 7px; }
 .lyric-export-note { margin: 9px 0 0; font-size: 11px; line-height: 1.6; }
+.lyric-provider-test { display: grid; gap: 10px; margin: 14px 0; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-soft); }
+.lyric-provider-test > div:first-child strong,
+.lyric-provider-test > div:first-child span { display: block; }
+.lyric-provider-test > div:first-child span { margin-top: 3px; color: var(--muted); font-size: 12px; }
+.lyric-provider-test-form { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, .8fr) auto; gap: 10px; }
+.lyric-provider-test-result { padding: 11px 13px; border: 1px solid var(--border); border-radius: 12px; font-size: 12px; }
+.lyric-provider-test-result strong,
+.lyric-provider-test-result span { display: block; }
+.lyric-provider-test-result span { margin-top: 3px; color: var(--muted); }
+.lyric-provider-test-result pre { max-height: 120px; margin: 9px 0 0; overflow: auto; white-space: pre-wrap; color: var(--text-soft); font: 11px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.lyric-provider-test-result.is-success { border-color: color-mix(in srgb, var(--green) 40%, var(--border)); background: color-mix(in srgb, var(--green) 7%, var(--surface)); }
+.lyric-provider-test-result.is-error { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); background: color-mix(in srgb, var(--warning) 7%, var(--surface)); }
 @media (max-width: 720px) {
   .lyric-preview-content { min-height: 240px; max-height: 48vh; }
   .lyric-preview-actions, .lyric-preview-export-actions { width: 100%; }
   .lyric-preview-actions > button, .lyric-preview-export-actions > button { flex: 1 1 120px; }
+  .lyric-provider-test-form { grid-template-columns: 1fr; }
+  .lyric-provider-test-form button { width: 100%; }
 }
 .download-favorites { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 12px; align-items: end; margin-bottom: 10px; }
 .favorite-directory-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
@@ -1648,6 +1666,22 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
 .diagnostic-flow { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 18px; }
 .diagnostic-check-grid.ui-status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .diagnostic-check-grid .ui-status-summary { min-height: 34px; }
+/* Diagnostics density: one compact card language across steps, live state and checks. */
+.diagnostics-card { --diagnostic-radius: 13px; padding: 20px; }
+.diagnostic-flow { gap: 10px; margin-bottom: 14px; }
+.diagnostic-flow .ui-step-card { min-height: 56px; padding: 10px 12px 10px 48px; border-radius: var(--diagnostic-radius); }
+.diagnostic-flow .ui-step-card::before { top: 13px; left: 12px; width: 26px; height: 26px; }
+.diagnostic-overview { min-height: 58px; margin-bottom: 14px; padding: 11px 13px; border-radius: var(--diagnostic-radius); }
+.diagnostic-queue-status { gap: 10px; margin: -4px 0 14px; }
+.diagnostic-live-card { min-height: 72px; padding: 10px 12px; border-radius: var(--diagnostic-radius); }
+.diagnostic-live-card > p { margin-top: 6px; }
+.diagnostic-groups { gap: 14px; }
+.diagnostic-group h3 { margin-bottom: 8px; }
+.diagnostic-check-grid.ui-status-grid { gap: 10px; }
+.diagnostic-check-grid .ui-status-card { min-height: 118px; display: flex; flex-direction: column; padding: 10px 12px; border-radius: var(--diagnostic-radius); }
+.diagnostic-check-grid .ui-status-summary { min-height: 32px; margin-top: 7px; }
+.diagnostic-check-grid .ui-diagnostic { margin-top: auto; }
+.lyric-provider-test { border-radius: var(--diagnostic-radius); }
 .download-summary.ui-status-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .download-summary .ui-status-card { padding: 11px 12px; }
 .download-summary .ui-status-head { align-items: flex-start; }
@@ -1685,6 +1719,9 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
   .download-actions > button { width: 100%; }
   .download-actions > button:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .risk-confirm-card .ui-impact-list li { align-items: flex-start; flex-direction: column; gap: 1px; }
+}
+@media (min-width: 641px) and (max-width: 1050px) {
+  .diagnostic-check-grid.ui-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .download-queue-control { display: flex; justify-content: space-between; gap: 14px; align-items: center; margin-bottom: 14px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--green) 30%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--green-soft) 52%, var(--surface-soft)); }
 .download-queue-control.is-paused, .download-queue-control.has-circuit { border-color: color-mix(in srgb, var(--warning) 34%, var(--border)); background: color-mix(in srgb, var(--warning-soft) 58%, var(--surface-soft)); }

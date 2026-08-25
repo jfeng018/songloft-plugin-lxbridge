@@ -1,6 +1,6 @@
 /// <reference types="@songloft/plugin-sdk" />
 import type { HTTPRequest, HTTPResponse, InboundWebSocket, WebSocketRequest } from '@songloft/plugin-sdk';
-import { createRouter, jsonResponse } from '@songloft/plugin-sdk';
+import { createRouter, jsonResponse, parseQuery } from '@songloft/plugin-sdk';
 import { RuntimeManager } from './engine/manager';
 import { SourceManager } from './source/manager';
 import { createExternalSearchRoute, createMusicUrlRoute, createSearchRoute } from './handlers/search';
@@ -23,6 +23,8 @@ import { loadSharedPlaylist } from './songlist/shared';
 import { parseLxmcBase64 } from './songlist/lxmc';
 import { runDiagnostics } from './handlers/diagnostics';
 import { getLyricSettings, setLyricSettings, type LyricSettings } from './lyrics/settings';
+import { resolveLyricsByMetadata } from './lyrics/resolver';
+import { applyLyricProvider, getLyricProviderStatus, unregisterLyricProvider } from './lyrics/provider';
 
 const router = createRouter();
 const runtimeManager = new RuntimeManager();
@@ -81,7 +83,10 @@ router.get('/api/status', async () => jsonResponse({
 router.post('/api/diagnostics/run', async () => jsonResponse({
   code: 0,
   msg: 'success',
-  data: await runDiagnostics({ initialized: () => initialized, runtimeManager, sourceManager, lxSyncService, downloadManager }),
+  data: await runDiagnostics({ initialized: () => initialized, runtimeManager, sourceManager, lxSyncService, downloadManager, lyricProviderStatus: async () => {
+    const settings = await getLyricSettings();
+    return getLyricProviderStatus(settings.provider_enabled);
+  } }),
 }));
 
 router.post('/api/search', createSearchRoute());
@@ -209,10 +214,33 @@ router.get('/api/settings/lyrics', async () => jsonResponse({
 router.put('/api/settings/lyrics', async (req) => {
   try {
     const body = parseJSONBody<Partial<LyricSettings>>(req);
-    return jsonResponse({ code: 0, msg: 'success', data: await setLyricSettings(body) });
+    const settings = await setLyricSettings(body);
+    applyLyricProvider(settings);
+    return jsonResponse({ code: 0, msg: 'success', data: settings });
   } catch (error) {
     return jsonResponse({ code: 400, msg: String((error as Error)?.message || error), data: null }, 400);
   }
+});
+router.get('/api/lyrics/provider/status', async () => {
+  const settings = await getLyricSettings();
+  return jsonResponse({ code: 0, msg: 'success', data: getLyricProviderStatus(settings.provider_enabled) });
+});
+router.get('/api/lyrics/test', async (req) => {
+  const q = parseQuery(req.query || '');
+  const result = await resolveLyricsByMetadata({ title: q.title || '', artist: q.artist || '', album: q.album || '', duration: Number(q.duration || 0) });
+  return jsonResponse({ code: result.status === 'completed' ? 0 : 404, msg: result.message, data: result }, result.status === 'completed' ? 200 : 404);
+});
+router.get('/lyric-search', async (req) => {
+  const settings = await getLyricSettings();
+  if (!settings.provider_enabled) return jsonResponse({ error: 'lyrics provider disabled' }, 503);
+  const q = parseQuery(req.query || '');
+  const result = await resolveLyricsByMetadata({ title: q.title || '', artist: q.artist || '', album: q.album || '', duration: Number(q.duration || 0) });
+  if (result.status !== 'completed') return jsonResponse(null, 404);
+  return jsonResponse({
+    lyric: result.lyric || result.lxlyric || result.displayLyric,
+    ...(result.tlyric ? { tlyric: result.tlyric } : {}),
+    ...(result.lxlyric ? { lxlyric: result.lxlyric } : {}),
+  });
 });
 router.post('/api/songlist/file', async (req) => {
   try {
@@ -285,6 +313,9 @@ async function onInit(): Promise<void> {
   }
   await downloadManager.init();
   await sourceManager.init();
+  try { applyLyricProvider(await getLyricSettings()); } catch (error) {
+    songloft.log.warn(`[neo-lxbridge] native lyric provider registration failed: ${String(error)}`);
+  }
   initialized = true;
   registerToMiot();
   songloft.log.info(`[neo-lxbridge] initialized, ${runtimeManager.getStatus().length} source runtime(s) active`);
@@ -292,6 +323,7 @@ async function onInit(): Promise<void> {
 
 async function onDeinit(): Promise<void> {
   initialized = false;
+  unregisterLyricProvider();
   if (miotRegistrationTimer) {
     clearTimeout(miotRegistrationTimer);
     miotRegistrationTimer = null;

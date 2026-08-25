@@ -13,6 +13,7 @@ import { matchScore, searchAcross } from './search';
 import type { ResolvedUrl } from '../types';
 import type { ResolvedLyrics } from '../lyrics/resolver';
 import { getLyricSettings } from '../lyrics/settings';
+import type { LyricPreferredSource } from '../lyrics/settings';
 import { getDownloadLyricSnapshot, saveDownloadLyricSnapshot } from '../lyrics/downloadStore';
 
 interface DownloadRequest {
@@ -370,7 +371,7 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
     retryLyric: async (req: HTTPRequest): Promise<HTTPResponse> => {
       let jobId = '';
       try {
-        const body = parseJSONBody<{ id?: string }>(req);
+        const body = parseJSONBody<{ id?: string; preferred_source?: LyricPreferredSource }>(req);
         jobId = String(body.id || '');
         if (!jobId) throw new Error('缺少下载任务 id');
         const job = manager.get(jobId);
@@ -403,7 +404,7 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
         await upsertSearchSongs([item], true, '', result => {
           lyricResult = result;
           manager.setLyricState(jobId, result.status, result);
-        });
+        }, body.preferred_source);
         if (lyricResult) await saveDownloadLyricSnapshot(jobId, job.song_id, item, lyricResult);
         return ok({ job: manager.get(jobId) });
       } catch (error) {

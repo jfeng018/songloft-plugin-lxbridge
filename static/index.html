@@ -40,7 +40,7 @@
           <div class="brand-copy">
             <div class="brand-row">
               <h1>Songloft LxBridge</h1>
-          <span class="version-badge">v1.3.2</span>
+          <span class="version-badge">v1.4.0</span>
             </div>
             <p>汇聚多平台音源 · 焕新私人音乐库</p>
           </div>
@@ -783,6 +783,18 @@
             </div>
             <p id="playbackSettingsState" class="muted settings-state" aria-live="polite"></p>
           </div>
+          <div class="lyric-provider-test">
+            <div>
+              <strong>原生歌词查询测试</strong>
+              <span>模拟 Songloft 调用歌词提供者，只查询歌词，不会修改歌曲或开始播放。</span>
+            </div>
+            <div class="lyric-provider-test-form">
+              <input id="lyricTestTitle" placeholder="歌曲名，例如 Bohemian Rhapsody">
+              <input id="lyricTestArtist" placeholder="歌手，例如 Queen">
+              <button id="testLyricProvider" class="secondary" type="button">测试歌词</button>
+            </div>
+            <div id="lyricProviderTestResult" class="hidden" aria-live="polite"></div>
+          </div>
 
           <div class="card">
             <div class="section-heading settings-heading">
@@ -793,6 +805,14 @@
               </div>
             </div>
             <div class="lyric-settings-row">
+              <label class="check-card">
+                <input id="lyricProviderEnabled" type="checkbox">
+                <span class="check-mark"></span>
+                <span>
+                  <strong>Songloft 原生歌词</strong>
+                  <small>注册为系统歌词提供者；默认关闭，避免与其他歌词插件冲突。</small>
+                </span>
+              </label>
               <label class="check-card">
                 <input id="lyricAutoFetch" type="checkbox" checked>
                 <span class="check-mark"></span>
@@ -809,6 +829,17 @@
                   <small>原平台无歌词时，仅使用歌名、歌手和时长均高度匹配的其他版本。</small>
                 </span>
               </label>
+              <div class="field setting-select-card">
+                <label for="lyricPreferredSource">歌词来源</label>
+                <select id="lyricPreferredSource">
+                  <option value="auto">自动选择（推荐）</option>
+                  <option value="kw">优先酷我</option>
+                  <option value="kg">优先酷狗</option>
+                  <option value="tx">优先 QQ 音乐</option>
+                  <option value="wy">优先网易云</option>
+                  <option value="mg">优先咪咕</option>
+                </select>
+              </div>
               <div class="field setting-select-card">
                 <label for="lyricTranslationMode">翻译歌词</label>
                 <select id="lyricTranslationMode">
@@ -827,7 +858,9 @@
                   <option value="3000">3 秒</option>
                 </select>
               </div>
-              <button id="saveLyricSettings" class="primary settings-save" type="button">保存</button>
+            </div>
+            <div class="settings-card-actions">
+              <button id="saveLyricSettings" class="primary settings-save" type="button">保存歌词设置</button>
             </div>
             <p id="lyricSettingsState" class="muted settings-state" aria-live="polite"></p>
           </div>
@@ -1146,7 +1179,20 @@
         <div id="lyricPreviewTabs" class="lyric-preview-tabs" role="tablist" aria-label="歌词类型"></div>
         <pre id="lyricPreviewContent" class="lyric-preview-content">正在读取歌词…</pre>
         <div class="modal-actions lyric-preview-actions">
-          <button id="retryLyricPreview" class="secondary" type="button">重新获取歌词</button>
+          <div class="row lyric-preview-retry-actions">
+            <label class="field lyric-retry-source" for="lyricRetrySource">
+              <span>本次歌词来源</span>
+              <select id="lyricRetrySource">
+                <option value="">按全局设置</option>
+                <option value="kw">酷我</option>
+                <option value="kg">酷狗</option>
+                <option value="tx">QQ 音乐</option>
+                <option value="wy">网易云</option>
+                <option value="mg">咪咕</option>
+              </select>
+            </label>
+            <button id="retryLyricPreview" class="secondary" type="button">重新获取歌词</button>
+          </div>
           <div class="row lyric-preview-export-actions">
             <button id="copyLyricPreview" class="secondary" type="button">复制当前歌词</button>
             <button id="exportLyricPreview" class="primary" type="button">导出 LRC</button>

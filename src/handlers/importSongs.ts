@@ -4,7 +4,7 @@ import { callHostAPI } from '../utils/http';
 import { parseJSONBody } from './request';
 import { errorMessage, fail, ok } from './response';
 import { resolveLyrics, type ResolvedLyrics } from '../lyrics/resolver';
-import { getLyricSettings } from '../lyrics/settings';
+import { getLyricSettings, type LyricPreferredSource } from '../lyrics/settings';
 
 export type SearchSongItem = SearchResultItem & { source_data?: Record<string, any> };
 
@@ -34,7 +34,7 @@ function stableId(song: MusicInfo): string {
 
 export type LyricResultCallback = (result: ResolvedLyrics, index: number) => void;
 
-async function mapSong(item: SearchSongItem, fetchLyric: boolean, dedupSuffix = '', lyricCallback?: LyricResultCallback, index = 0): Promise<Record<string, unknown>> {
+async function mapSong(item: SearchSongItem, fetchLyric: boolean, dedupSuffix = '', lyricCallback?: LyricResultCallback, index = 0, lyricPreferredSource?: LyricPreferredSource): Promise<Record<string, unknown>> {
   const sourceData = item.source_data || {};
   const platform = sourceData.platform;
   const songInfo = sourceData.songInfo as MusicInfo | undefined;
@@ -42,7 +42,7 @@ async function mapSong(item: SearchSongItem, fetchLyric: boolean, dedupSuffix = 
 
   let lyricResult: ResolvedLyrics = { status: 'skipped', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source: '', fallback: false, message: '未启用歌词抓取', error: '' };
   if (fetchLyric) {
-    lyricResult = await resolveLyrics(item);
+    lyricResult = await resolveLyrics(item, undefined, lyricPreferredSource);
     if (lyricResult.status === 'failed') songloft.log.warn(`获取歌词失败 ${item.title}: ${lyricResult.error || lyricResult.message}`);
   }
   lyricCallback?.(lyricResult, index);
@@ -74,14 +74,14 @@ async function mapSong(item: SearchSongItem, fetchLyric: boolean, dedupSuffix = 
   return payload;
 }
 
-async function mapWithConcurrency(items: SearchSongItem[], fetchLyric: boolean, concurrency = 3, dedupSuffix = '', lyricCallback?: LyricResultCallback): Promise<Record<string, unknown>[]> {
+async function mapWithConcurrency(items: SearchSongItem[], fetchLyric: boolean, concurrency = 3, dedupSuffix = '', lyricCallback?: LyricResultCallback, lyricPreferredSource?: LyricPreferredSource): Promise<Record<string, unknown>[]> {
   const result: Record<string, unknown>[] = new Array(items.length);
   let index = 0;
   const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
     while (true) {
       const current = index++;
       if (current >= items.length) return;
-      result[current] = await mapSong(items[current], fetchLyric, dedupSuffix, lyricCallback, current);
+      result[current] = await mapSong(items[current], fetchLyric, dedupSuffix, lyricCallback, current, lyricPreferredSource);
     }
   });
   await Promise.all(workers);
@@ -92,9 +92,9 @@ async function mapWithConcurrency(items: SearchSongItem[], fetchLyric: boolean, 
  * 把搜索结果写入 Songloft 歌曲库。宿主按 (plugin_entry_path, dedup_key)
  * 执行 upsert，因此重复导入会复用同一歌曲 ID；已下载为 local 的歌曲不会被覆盖回 remote。
  */
-export async function upsertSearchSongs(items: SearchSongItem[], fetchLyric = true, dedupSuffix = '', lyricCallback?: LyricResultCallback): Promise<ImportedSongRecord[]> {
+export async function upsertSearchSongs(items: SearchSongItem[], fetchLyric = true, dedupSuffix = '', lyricCallback?: LyricResultCallback, lyricPreferredSource?: LyricPreferredSource): Promise<ImportedSongRecord[]> {
   if (!items.length) return [];
-  const payload = await mapWithConcurrency(items, fetchLyric, 3, dedupSuffix, lyricCallback);
+  const payload = await mapWithConcurrency(items, fetchLyric, 3, dedupSuffix, lyricCallback, lyricPreferredSource);
   const created = await callHostAPI<{ songs: ImportedSongRecord[]; count: number }>('/api/v1/songs/remote', {
     method: 'POST',
     body: JSON.stringify(payload),

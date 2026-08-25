@@ -781,6 +781,29 @@
     };
   }
 
+  $('testLyricProvider').addEventListener('click', async () => {
+    const button = $('testLyricProvider');
+    const title = $('lyricTestTitle').value.trim();
+    const artist = $('lyricTestArtist').value.trim();
+    const result = $('lyricProviderTestResult');
+    if (!title) return toast('请先填写歌曲名');
+    setBusy(button, true, '查询中');
+    result.className = 'lyric-provider-test-result is-loading';
+    result.textContent = '正在按当前歌词来源设置查询…';
+    try {
+      const query = new URLSearchParams({ title, artist });
+      const resp = await request(`/api/lyrics/test?${query}`);
+      const data = resp.data || {};
+      const source = platformNames[data.source] || data.source || '未知来源';
+      const preview = String(data.displayLyric || data.lyric || data.lxlyric || '').split(/\r?\n/).slice(0, 4).join('\n');
+      result.className = 'lyric-provider-test-result is-success';
+      result.innerHTML = `<strong>查询成功 · ${escapeHtml(source)}</strong><span>${escapeHtml(data.message || '')}</span><pre>${escapeHtml(preview || '已返回歌词，但没有可预览文本')}</pre>`;
+    } catch (error) {
+      result.className = 'lyric-provider-test-result is-error';
+      result.innerHTML = `<strong>未找到歌词</strong><span>${escapeHtml(error.message)}</span>`;
+    } finally { setBusy(button, false); }
+  });
+
   function setPlaylistImportMode(mode) {
     const normalized = ['link', 'file', 'service'].includes(mode) ? mode : 'link';
     state.playlistImportMode = normalized;
@@ -2179,7 +2202,7 @@
     setBusy(button, true, '正在获取');
     try {
       const resp = await request('/api/songs/download/lyric/retry', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: jobId }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: jobId, preferred_source: $('lyricRetrySource').value || undefined }),
       });
       await loadDownloads();
       await openLyricPreview(jobId);
@@ -3236,7 +3259,9 @@ curl -X POST "${endpoint}" \
 
   function renderLyricSettings(settings) {
     $('lyricAutoFetch').checked = settings?.auto_fetch !== false;
+    $('lyricProviderEnabled').checked = settings?.provider_enabled === true;
     $('lyricFallbackEnabled').checked = settings?.fallback_enabled !== false;
+    $('lyricPreferredSource').value = settings?.preferred_source || 'auto';
     $('lyricTranslationMode').value = settings?.translation_mode || 'merge';
     const interval = String(settings?.request_interval_ms || 600);
     if (![...$('lyricRequestInterval').options].some(option => option.value === interval)) {
@@ -3247,7 +3272,8 @@ curl -X POST "${endpoint}" \
     }
     $('lyricRequestInterval').value = interval;
     const modeText = $('lyricTranslationMode').selectedOptions[0]?.textContent || '原文＋翻译';
-    $('lyricSettingsState').textContent = `已保存：${settings?.auto_fetch === false ? '手动获取' : '自动获取'} · ${settings?.fallback_enabled === false ? '仅原平台' : '允许跨平台补全'} · ${modeText}`;
+    const sourceText = $('lyricPreferredSource').selectedOptions[0]?.textContent || '自动选择';
+    $('lyricSettingsState').textContent = `已保存：${settings?.provider_enabled ? '原生提供者已启用' : '原生提供者未启用'} · ${settings?.auto_fetch === false ? '手动获取' : '自动获取'} · ${sourceText} · ${settings?.fallback_enabled === false ? '不补全' : '允许跨平台补全'} · ${modeText}`;
     $('lyricSettingsState').classList.remove('is-warning');
   }
 
@@ -3270,7 +3296,9 @@ curl -X POST "${endpoint}" \
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           auto_fetch: $('lyricAutoFetch').checked,
+          provider_enabled: $('lyricProviderEnabled').checked,
           fallback_enabled: $('lyricFallbackEnabled').checked,
+          preferred_source: $('lyricPreferredSource').value,
           translation_mode: $('lyricTranslationMode').value,
           request_interval_ms: Number($('lyricRequestInterval').value || 600),
         }),

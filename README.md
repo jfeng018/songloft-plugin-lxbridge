@@ -4,6 +4,16 @@ Songloft LxBridge（中文名：Songloft 洛雪音源桥）把洛雪自定义音
 
 > v0.5.0 起插件永久内部标识为 `neo-lxbridge`。后续版本即使更改显示名称，也不再更改该标识。
 
+## v1.4.0
+
+发布版本：`v1.4.0`。
+
+- 歌词设置新增首选来源，可优先使用酷我、酷狗、QQ 音乐、网易云或咪咕，并保留安全跨平台补全；
+- 歌词预览支持为单首歌曲临时指定来源并重新获取；
+- 新增可选的 Songloft 原生歌词提供者，按宿主标准 `/lyric-search` 协议自动补全缺失歌词；
+- 运行诊断新增原生歌词提供者状态和歌词查询测试；
+- 统一收紧诊断页面步骤卡、实时状态卡和结果卡，并统一歌词设置保存按钮样式。
+
 ## v1.3.2
 
 发布版本：`v1.3.2`。
@@ -334,16 +344,16 @@ https://github.com/NeoHeee/songloft-plugin-lxbridge/blob/main/registry.json
 
 从 [Releases](https://github.com/NeoHeee/songloft-plugin-lxbridge/releases/latest) 下载：
 
-- `neo-lxbridge-v1.3.2.jsplugin.zip`：安装包
-- `neo-lxbridge-v1.3.2.jsplugin.zip.sha256`：SHA-256
-- `songloft-plugin-neo-lxbridge-v1.3.2-source.zip`：源码归档
+- `neo-lxbridge-v1.4.0.jsplugin.zip`：安装包
+- `neo-lxbridge-v1.4.0.jsplugin.zip.sha256`：SHA-256
+- `songloft-plugin-neo-lxbridge-v1.4.0-source.zip`：源码归档
 
-在 Songloft 插件管理页面上传 `neo-lxbridge-v1.3.2.jsplugin.zip`。不要解压安装包，也不要上传源码归档。
+在 Songloft 插件管理页面上传 `neo-lxbridge-v1.4.0.jsplugin.zip`。不要解压安装包，也不要上传源码归档。
 
 可选：下载 `.sha256` 文件并校验安装包完整性。在 Windows PowerShell 中运行：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\neo-lxbridge-v1.3.2.jsplugin.zip
+Get-FileHash -Algorithm SHA256 .\neo-lxbridge-v1.4.0.jsplugin.zip
 ```
 
 命令输出应与 `.sha256` 文件中的值一致。
@@ -385,6 +395,8 @@ dist/neo-lxbridge.jsplugin.zip
 4. 搜索歌曲，选择当前音源支持的目标音质。
 5. 试听、导入到 Songloft 音乐库，或加入后台下载队列。
 
+歌词设置支持自动获取、首选平台、跨平台补全、翻译模式和请求间隔。“Songloft 原生歌词”默认关闭；开启后 LxBridge 会注册为系统歌词提供者，在歌曲缺少歌词时响应 Songloft 的原生查询。如果已经安装其他歌词提供者插件，建议只启用其中一个，避免提供者选择产生冲突。运行诊断页面可以用歌名和歌手测试当前歌词匹配链路。
+
 ## API
 
 主程序契约：
@@ -409,6 +421,9 @@ dist/neo-lxbridge.jsplugin.zip
 - `POST /external/search`
 - `POST /api/direct/music/url`
 - `GET /api/direct/lyric`
+- `GET /lyric-search?title=...&artist=...&album=...&duration=...`
+- `GET /api/lyrics/test?title=...&artist=...`
+- `GET /api/lyrics/provider/status`
 - `POST /api/search/topone`
 - `POST /api/search/best`
 
@@ -431,7 +446,7 @@ npm run validate
 dist/neo-lxbridge.jsplugin.zip
 ```
 
-构建器按入口 `neo-lxbridge` 生成内部包名；Release 会将其发布为 `neo-lxbridge-v1.3.2.jsplugin.zip`。
+构建器按入口 `neo-lxbridge` 生成内部包名；Release 会将其发布为 `neo-lxbridge-v1.4.0.jsplugin.zip`。
 
 ## 安全与免责声明
 

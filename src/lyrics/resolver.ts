@@ -2,7 +2,7 @@ import type { SearchResultItem } from '@songloft/plugin-sdk';
 import type { LyricResult, MusicInfo, PlatformId } from '../types';
 import { musicSdk } from '../musicSdk/facade';
 import { matchScore, searchAcross } from '../handlers/search';
-import { getLyricSettings, type LyricTranslationMode } from './settings';
+import { getLyricSettings, type LyricPreferredSource, type LyricTranslationMode } from './settings';
 
 export type LyricStatus = 'pending' | 'fetching' | 'completed' | 'not_found' | 'failed' | 'skipped';
 
@@ -16,6 +16,13 @@ export interface ResolvedLyrics {
   fallback: boolean;
   message: string;
   error: string;
+}
+
+export interface LyricMetadataQuery {
+  title: string;
+  artist?: string;
+  album?: string;
+  duration?: number;
 }
 
 const PLATFORM_IDS = new Set<PlatformId>(['kw', 'kg', 'tx', 'wy', 'mg']);
@@ -136,9 +143,10 @@ async function trySong(platform: PlatformId, song: MusicInfo, fallback: boolean,
   }
 }
 
-export async function resolveLyrics(item: SearchResultItem, allowFallback?: boolean): Promise<ResolvedLyrics> {
+export async function resolveLyrics(item: SearchResultItem, allowFallback?: boolean, preferredSourceOverride?: LyricPreferredSource): Promise<ResolvedLyrics> {
   const settings = await getLyricSettings();
   const fallbackEnabled = allowFallback ?? settings.fallback_enabled;
+  const preferredSource = preferredSourceOverride || settings.preferred_source;
   const sourceData = item.source_data || {};
   const originalSource = String(sourceData.platform || '') as PlatformId;
   const originalSong = sourceData.songInfo as MusicInfo | undefined;
@@ -146,31 +154,106 @@ export async function resolveLyrics(item: SearchResultItem, allowFallback?: bool
     return { status: 'failed', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source: '', fallback: false, message: '歌曲缺少歌词来源信息', error: 'source_data 格式无效' };
   }
 
-  const direct = await trySong(originalSource, originalSong, false, settings.translation_mode, settings.request_interval_ms);
-  if (direct) return direct;
-  if (!fallbackEnabled) {
-    return { status: 'not_found', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source: originalSource, fallback: false, message: '原平台没有返回歌词', error: '' };
-  }
-
   const title = item.title || originalSong.name || '';
   const artist = item.artist || originalSong.singer || '';
   const duration = Number(item.duration || originalSong.duration || 0) || undefined;
+  if (preferredSource === 'auto' || preferredSource === originalSource) {
+    const direct = await trySong(originalSource, originalSong, false, settings.translation_mode, settings.request_interval_ms);
+    if (direct) return preferredSource === originalSource
+      ? { ...direct, message: `已从首选来源${PLATFORM_NAMES[originalSource]}获取歌词` }
+      : direct;
+    if (!fallbackEnabled) {
+      const message = preferredSource === 'auto' ? '原平台没有返回歌词' : `指定的${PLATFORM_NAMES[originalSource]}没有返回歌词`;
+      return { status: 'not_found', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source: originalSource, fallback: false, message, error: '' };
+    }
+  }
+
   try {
     const candidates = (await searchAcross(`${title} ${artist}`.trim(), 1, 10, '128k'))
-      .filter(candidate => isPlatform(candidate.source_data?.platform) && candidate.source_data.platform !== originalSource)
+      .filter(candidate => isPlatform(candidate.source_data?.platform))
       .map(candidate => ({ candidate, score: matchScore(candidate, title, artist, duration) }))
       .filter(entry => entry.score >= 130)
       .sort((a, b) => b.score - a.score);
-    for (const { candidate } of candidates.slice(0, 5)) {
+
+    if (preferredSource !== 'auto') {
+      if (preferredSource !== originalSource) {
+        for (const { candidate } of candidates.filter(entry => entry.candidate.source_data?.platform === preferredSource).slice(0, 3)) {
+          const song = candidate.source_data.songInfo as MusicInfo | undefined;
+          if (!song) continue;
+          const result = await trySong(preferredSource, song, true, settings.translation_mode, settings.request_interval_ms);
+          if (result) return { ...result, message: `已从首选来源${PLATFORM_NAMES[preferredSource]}获取歌词` };
+        }
+      }
+      if (!fallbackEnabled) {
+        return { status: 'not_found', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source: preferredSource, fallback: preferredSource !== originalSource, message: `指定的${PLATFORM_NAMES[preferredSource]}没有找到匹配歌词`, error: '' };
+      }
+    }
+
+    if (preferredSource !== 'auto' && preferredSource !== originalSource) {
+      const direct = await trySong(originalSource, originalSong, false, settings.translation_mode, settings.request_interval_ms);
+      if (direct) return direct;
+    }
+
+    for (const { candidate } of candidates.filter(entry => {
+      const platform = entry.candidate.source_data?.platform;
+      return platform !== originalSource && platform !== preferredSource;
+    }).slice(0, 5)) {
       const platform = candidate.source_data.platform as PlatformId;
       const song = candidate.source_data.songInfo as MusicInfo | undefined;
       if (!song) continue;
       const result = await trySong(platform, song, true, settings.translation_mode, settings.request_interval_ms);
       if (result) return result;
     }
-    return { status: 'not_found', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source: originalSource, fallback: false, message: '原平台及其他安全匹配版本均没有歌词', error: '' };
+    return { status: 'not_found', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source: originalSource, fallback: false, message: preferredSource === 'auto' ? '原平台及其他安全匹配版本均没有歌词' : `首选来源、原平台及其他安全匹配版本均没有歌词`, error: '' };
   } catch (error) {
     return { status: 'failed', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source: originalSource, fallback: false, message: '歌词跨平台匹配失败', error: String((error as Error)?.message || error) };
+  }
+}
+
+export async function resolveLyricsByMetadata(query: LyricMetadataQuery, preferredSourceOverride?: LyricPreferredSource): Promise<ResolvedLyrics> {
+  const settings = await getLyricSettings();
+  const preferredSource = preferredSourceOverride || settings.preferred_source;
+  const title = normalizeText(query.title);
+  const artist = normalizeText(query.artist);
+  const album = normalizeText(query.album);
+  const duration = Number(query.duration || 0) || undefined;
+  if (!title) {
+    return { status: 'failed', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source: '', fallback: false, message: '缺少歌曲名称', error: 'title 不能为空' };
+  }
+  try {
+    const threshold = artist ? 130 : 90;
+    const candidates = (await searchAcross(`${title} ${artist}`.trim(), 1, 12, '128k'))
+      .filter(candidate => isPlatform(candidate.source_data?.platform))
+      .map(candidate => {
+        const albumScore = album && normalizeText(candidate.album) === album ? 20 : 0;
+        return { candidate, score: matchScore(candidate, title, artist, duration) + albumScore };
+      })
+      .filter(entry => entry.score >= threshold)
+      .sort((a, b) => b.score - a.score);
+    const eligible = preferredSource !== 'auto' && !settings.fallback_enabled
+      ? candidates.filter(entry => entry.candidate.source_data?.platform === preferredSource)
+      : candidates.sort((a, b) => {
+          const aPreferred = a.candidate.source_data?.platform === preferredSource ? 1 : 0;
+          const bPreferred = b.candidate.source_data?.platform === preferredSource ? 1 : 0;
+          return bPreferred - aPreferred || b.score - a.score;
+        });
+    for (const { candidate } of eligible.slice(0, 6)) {
+      const platform = candidate.source_data.platform as PlatformId;
+      const song = candidate.source_data.songInfo as MusicInfo | undefined;
+      if (!song) continue;
+      const result = await trySong(platform, song, false, settings.translation_mode, settings.request_interval_ms);
+      if (result) return { ...result, message: `Songloft 原生歌词由${PLATFORM_NAMES[platform]}提供` };
+    }
+    const source = preferredSource === 'auto' ? '' : preferredSource;
+    return {
+      status: 'not_found', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source, fallback: false,
+      message: preferredSource !== 'auto' && !settings.fallback_enabled
+        ? `指定的${PLATFORM_NAMES[preferredSource]}没有找到匹配歌词`
+        : '没有找到安全匹配的歌词',
+      error: '',
+    };
+  } catch (error) {
+    return { status: 'failed', lyric: '', tlyric: '', lxlyric: '', displayLyric: '', source: '', fallback: false, message: '原生歌词查询失败', error: String((error as Error)?.message || error) };
   }
 }
 

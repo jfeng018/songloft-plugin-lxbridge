@@ -31,6 +31,7 @@ type DiagnosticDependencies = {
   sourceManager: SourceManager;
   lxSyncService: LxSyncService;
   downloadManager: DownloadManager;
+  lyricProviderStatus: () => Promise<{ enabled: boolean; registered: boolean; available: boolean }>;
 };
 
 function messageOf(error: unknown): string {
@@ -159,6 +160,14 @@ export async function runDiagnostics(deps: DiagnosticDependencies): Promise<{ ge
     check('external', 'integration', '外部搜索接口', async () => runtimeCount
       ? { status: 'pass', summary: '外部接口路由已就绪', detail: '/external/search、/api/search/topone、/api/search/best' }
       : { status: 'warn', summary: '接口路由可访问，但没有活动音源', suggestion: '外部搜索需要至少一个正常运行的音源。' }),
+    check('lyrics-provider', 'integration', '原生歌词提供者', async () => {
+      const status = await deps.lyricProviderStatus();
+      if (!status.available) return { status: 'warn', summary: '当前 Songloft 不支持歌词提供者接口', suggestion: '请升级 Songloft 后再启用原生歌词提供者。' };
+      if (!status.enabled) return { status: 'info', summary: '原生歌词提供者未启用', detail: '该功能默认关闭，不影响下载时获取歌词。' };
+      return status.registered
+        ? { status: 'pass', summary: 'LxBridge 已注册为 Songloft 原生歌词提供者', detail: '歌曲缺少歌词时，Songloft 可以调用 /lyric-search。' }
+        : { status: 'fail', summary: '原生歌词提供者已启用但未注册', suggestion: '请保存一次歌词设置或重新加载插件，并检查 Songloft 日志。' };
+    }),
     check('lx-sync', 'integration', '洛雪互联', async () => testLxSync(deps.lxSyncService)),
   ]);
   const { overall, counts } = summarizeDiagnosticChecks(checks);

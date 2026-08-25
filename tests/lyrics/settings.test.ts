@@ -18,7 +18,9 @@ describe('lyric settings', () => {
     const { getLyricSettings } = await import('../../src/lyrics/settings');
     await expect(getLyricSettings()).resolves.toEqual({
       auto_fetch: true,
+      provider_enabled: false,
       fallback_enabled: true,
+      preferred_source: 'auto',
       translation_mode: 'merge',
       request_interval_ms: 600,
     });
@@ -28,20 +30,30 @@ describe('lyric settings', () => {
     const { getLyricSettings, setLyricSettings } = await import('../../src/lyrics/settings');
     await expect(setLyricSettings({
       auto_fetch: false,
+      provider_enabled: true,
       fallback_enabled: false,
+      preferred_source: 'wy',
       translation_mode: 'translation',
       request_interval_ms: 50,
     })).resolves.toEqual({
       auto_fetch: false,
+      provider_enabled: true,
       fallback_enabled: false,
+      preferred_source: 'wy',
       translation_mode: 'translation',
       request_interval_ms: 300,
     });
     await expect(getLyricSettings()).resolves.toMatchObject({
       auto_fetch: false,
+      provider_enabled: true,
       fallback_enabled: false,
       translation_mode: 'translation',
       request_interval_ms: 300,
     });
+  });
+
+  it('falls back to automatic source for an invalid preference', async () => {
+    const { setLyricSettings } = await import('../../src/lyrics/settings');
+    await expect(setLyricSettings({ preferred_source: 'invalid' as never })).resolves.toMatchObject({ preferred_source: 'auto' });
   });
 });
