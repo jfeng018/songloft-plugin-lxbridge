@@ -42,6 +42,21 @@ describe('下载任务持久化', () => {
     expect(saved.jobs[0]).toMatchObject({ id: job.id, status: 'resolving', progress: 20 });
   });
 
+  it('歌词状态会写入持久化快照并可恢复', async () => {
+    const storage = new MemoryStorage();
+    const manager = new DownloadManager(storage);
+    await manager.init();
+    const job = manager.reserve({ title: '歌词歌曲' }, { lyric_status: 'pending' });
+    manager.setLyricState(job.id, 'completed', { source: 'wy', message: '已从网易云获取歌词' });
+    await manager.flush();
+
+    const restored = new DownloadManager(storage);
+    await restored.init();
+    expect(restored.get(job.id)).toMatchObject({
+      lyric_status: 'completed', lyric_source_id: 'wy', lyric_message: '已从网易云获取歌词',
+    });
+  });
+
   it('队列暂停状态会随快照恢复', async () => {
     const storage = new MemoryStorage();
     const first = new DownloadManager(storage);

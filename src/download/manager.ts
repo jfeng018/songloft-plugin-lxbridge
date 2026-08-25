@@ -1,4 +1,5 @@
 import { downloadDirectoryError, getRequestProtectionSettings } from './settings';
+import type { LyricStatus, ResolvedLyrics } from '../lyrics/resolver';
 
 export type DownloadJobStatus = 'pending' | 'resolving' | 'queued' | 'downloading' | 'verifying' | 'completed' | 'failed' | 'interrupted';
 export type DownloadFailureCategory = 'network_timeout' | 'rate_limited' | 'address_expired' | 'permission_denied' | 'directory_error' | 'source_error' | 'library_error' | 'interrupted' | 'unknown';
@@ -24,6 +25,10 @@ export interface DownloadJob {
   client_key?: string;
   source_id?: string;
   source_fallback_message?: string;
+  lyric_status?: LyricStatus;
+  lyric_source_id?: string;
+  lyric_message?: string;
+  lyric_error?: string;
   path?: string;
   error?: string;
   error_category?: DownloadFailureCategory;
@@ -196,7 +201,7 @@ export class DownloadManager {
     return removed;
   }
 
-  reserve(song: { title?: string; artist?: string }, metadata: Partial<Pick<DownloadJob, 'target_dir' | 'path_template' | 'client_key' | 'source_id'>> = {}): DownloadJob {
+  reserve(song: { title?: string; artist?: string }, metadata: Partial<Pick<DownloadJob, 'target_dir' | 'path_template' | 'client_key' | 'source_id' | 'lyric_status' | 'lyric_source_id' | 'lyric_message' | 'lyric_error'>> = {}): DownloadJob {
     const now = Date.now();
     const job: DownloadJob = {
       id: this.createId(0), song_id: 0, title: song.title || '未知歌曲', artist: song.artist || '',
@@ -222,6 +227,18 @@ export class DownloadManager {
     if (!job) throw new Error('下载任务不存在或已过期');
     job.source_id = sourceId || job.source_id;
     job.source_fallback_message = fallbackMessage || undefined;
+    job.updated_at = Date.now();
+    this.schedulePersist();
+    return { ...job };
+  }
+
+  setLyricState(id: string, status: LyricStatus, result?: Partial<ResolvedLyrics>): DownloadJob {
+    const job = this.jobs.get(id);
+    if (!job) throw new Error('下载任务不存在或已过期');
+    job.lyric_status = status;
+    job.lyric_source_id = String(result?.source || '') || undefined;
+    job.lyric_message = String(result?.message || '') || undefined;
+    job.lyric_error = String(result?.error || '') || undefined;
     job.updated_at = Date.now();
     this.schedulePersist();
     return { ...job };
@@ -255,7 +272,7 @@ export class DownloadManager {
     return { ...job };
   }
 
-  enqueue(song: { id: number; title?: string; artist?: string; type?: string; file_path?: string }, metadata: Partial<Pick<DownloadJob, 'total_bytes' | 'actual_quality' | 'content_type' | 'target_dir' | 'path_template' | 'source_id' | 'upgrade_source_song_id' | 'upgrade_source_bitrate' | 'upgrade_target_quality'>> = {}): DownloadJob {
+  enqueue(song: { id: number; title?: string; artist?: string; type?: string; file_path?: string }, metadata: Partial<Pick<DownloadJob, 'total_bytes' | 'actual_quality' | 'content_type' | 'target_dir' | 'path_template' | 'source_id' | 'lyric_status' | 'lyric_source_id' | 'lyric_message' | 'lyric_error' | 'upgrade_source_song_id' | 'upgrade_source_bitrate' | 'upgrade_target_quality'>> = {}): DownloadJob {
     if (!song.id) throw new Error('歌曲 ID 无效');
 
     if (song.type === 'local') {

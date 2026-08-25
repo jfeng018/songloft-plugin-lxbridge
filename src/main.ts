@@ -22,6 +22,7 @@ import { addSearchHistory, clearSearchHistory, getHotSearches, getSearchHistory,
 import { loadSharedPlaylist } from './songlist/shared';
 import { parseLxmcBase64 } from './songlist/lxmc';
 import { runDiagnostics } from './handlers/diagnostics';
+import { getLyricSettings, setLyricSettings, type LyricSettings } from './lyrics/settings';
 
 const router = createRouter();
 const runtimeManager = new RuntimeManager();
@@ -112,7 +113,10 @@ router.post('/api/songs/import', importSongsHandler);
 router.post('/api/songs/download', downloadApi.create);
 router.post('/api/songs/download/batch', downloadApi.createBatch);
 router.get('/api/songs/download', downloadApi.status);
+router.get('/api/songs/download/lyric', downloadApi.lyric);
+router.get('/api/songs/download/lyric/file', downloadApi.lyricFile);
 router.post('/api/songs/download/retry', downloadApi.retry);
+router.post('/api/songs/download/lyric/retry', downloadApi.retryLyric);
 router.delete('/api/songs/download', downloadApi.remove);
 router.post('/api/songs/download/queue', downloadApi.queue);
 router.get('/api/upgrade/scan', upgradeApi.scan);
@@ -193,6 +197,19 @@ router.post('/api/songlist/shared', async (req) => {
   try {
     const body = parseJSONBody<{ url?: string }>(req);
     return jsonResponse({ code: 0, msg: 'success', data: await loadSharedPlaylist(body.url) });
+  } catch (error) {
+    return jsonResponse({ code: 400, msg: String((error as Error)?.message || error), data: null }, 400);
+  }
+});
+router.get('/api/settings/lyrics', async () => jsonResponse({
+  code: 0,
+  msg: 'success',
+  data: await getLyricSettings(),
+}));
+router.put('/api/settings/lyrics', async (req) => {
+  try {
+    const body = parseJSONBody<Partial<LyricSettings>>(req);
+    return jsonResponse({ code: 0, msg: 'success', data: await setLyricSettings(body) });
   } catch (error) {
     return jsonResponse({ code: 400, msg: String((error as Error)?.message || error), data: null }, 400);
   }

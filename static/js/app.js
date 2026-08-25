@@ -1480,7 +1480,6 @@
       playlistId,
       playlistName,
       playlistLabel = '',
-      fetchLyric = true,
       successMessage = '',
     } = options;
     setBusy(button, true, '导入中');
@@ -1492,7 +1491,6 @@
           songs: items,
           playlist_id: playlistId || undefined,
           playlist_name: playlistName || undefined,
-          fetch_lyric: fetchLyric,
         }),
       });
       const count = resp.data?.count || items.length;
@@ -1518,7 +1516,6 @@
       const target = readPlaylistTarget('batchPlaylistTarget', 'playlistName');
       await importSongs(state.selected, $('importButton'), {
         ...target,
-        fetchLyric: $('fetchLyric').checked,
       });
       state.selected = [];
       localStorage.removeItem('neo-lxbridge:selected');
@@ -1540,7 +1537,6 @@
         <div class="sub">${escapeHtml(item.artist || '未知歌手')} · ${escapeHtml(item.album || '未知专辑')} · ${escapeHtml(platformNames[item.source_data?.platform] || item.source_data?.platform || '')}</div>
       </div>`;
     $('singlePlaylistName').value = '';
-    $('singleFetchLyric').checked = true;
     $('singlePlaylistTarget').value = '';
     toggleNewPlaylistField('singlePlaylistTarget', 'singleNewPlaylistField');
     $('importModal').classList.remove('hidden');
@@ -1576,7 +1572,6 @@
       const target = readPlaylistTarget('singlePlaylistTarget', 'singlePlaylistName');
       await importSongs([item], $('confirmSingleImport'), {
         ...target,
-        fetchLyric: $('singleFetchLyric').checked,
         successMessage: `已导入《${item.title}》到 Songloft 歌曲库${target.playlistLabel ? `，并加入歌单「${target.playlistLabel}」` : ''}`,
       });
       closeSingleImport();
@@ -2091,6 +2086,112 @@
     })[category] || '下载失败';
   }
 
+  function downloadLyricText(job) {
+    const source = platformNames[job.lyric_source_id] || job.lyric_source_id || '';
+    if (job.lyric_status === 'pending') return '歌词：等待获取';
+    if (job.lyric_status === 'fetching') return '歌词：获取中';
+    if (job.lyric_status === 'completed') return `歌词：${job.lyric_message || `${source ? `已从${source}` : '已'}获取`}`;
+    if (job.lyric_status === 'not_found') return `歌词：${job.lyric_message || '未找到可用歌词'}`;
+    if (job.lyric_status === 'failed') return `歌词：${job.lyric_message || '获取失败'}`;
+    if (job.lyric_status === 'skipped') return '歌词：已跳过';
+    return '';
+  }
+
+  let lyricPreviewData = null;
+  let lyricPreviewKind = 'written';
+
+  function closeLyricPreview() {
+    $('lyricPreviewModal').classList.add('hidden');
+    document.body.classList.remove('modal-open');
+    lyricPreviewData = null;
+  }
+
+  function lyricPreviewValue(kind) {
+    return lyricPreviewData ? String(lyricPreviewData[kind] || '') : '';
+  }
+
+  function renderLyricPreview() {
+    const data = lyricPreviewData || {};
+    const source = platformNames[data.source] || data.source || '未知来源';
+    const status = downloadLyricText({ lyric_status: data.status, lyric_source_id: data.source, lyric_message: data.message }).replace(/^歌词：/, '');
+    $('lyricPreviewTitle').textContent = data.title ? `《${data.title}》歌词` : '查看歌词';
+    $('lyricPreviewStatus').innerHTML = `<strong>${escapeHtml(data.title || '未知歌曲')}${data.artist ? ` · ${escapeHtml(data.artist)}` : ''}</strong><span>${escapeHtml(status || '尚无歌词状态')} · 来源：${escapeHtml(source)}${data.fallback ? ' · 跨平台补全' : ''}</span>`;
+    const tabs = [['written', '实际写入'], ['lyric', '原文'], ['tlyric', '翻译'], ['lxlyric', '逐字歌词']];
+    $('lyricPreviewTabs').innerHTML = tabs.map(([kind, label]) => {
+      const hasContent = Boolean(lyricPreviewValue(kind));
+      return `<button class="secondary${kind === lyricPreviewKind ? ' is-active' : ''}" type="button" role="tab" aria-selected="${kind === lyricPreviewKind}" data-lyric-kind="${kind}"${hasContent ? '' : ' disabled'}>${label}${hasContent ? '' : '（无）'}</button>`;
+    }).join('');
+    const content = lyricPreviewValue(lyricPreviewKind);
+    $('lyricPreviewContent').textContent = content || '当前类型没有可显示的歌词。';
+    $('lyricPreviewContent').classList.toggle('is-empty', !content);
+    $('copyLyricPreview').disabled = !content;
+    $('exportLyricPreview').disabled = !['written', 'lyric', 'tlyric', 'lxlyric'].some(kind => lyricPreviewValue(kind));
+    $('lyricPreviewTabs').querySelectorAll('[data-lyric-kind]').forEach(button => button.addEventListener('click', () => {
+      lyricPreviewKind = button.dataset.lyricKind;
+      renderLyricPreview();
+    }));
+  }
+
+  async function openLyricPreview(jobId, preferredKind = 'written') {
+    lyricPreviewKind = preferredKind;
+    $('lyricPreviewModal').classList.remove('hidden');
+    document.body.classList.add('modal-open');
+    $('lyricPreviewTitle').textContent = '查看歌词';
+    $('lyricPreviewStatus').textContent = '正在读取歌曲及歌词信息…';
+    $('lyricPreviewTabs').innerHTML = '';
+    $('lyricPreviewContent').textContent = '正在读取歌词…';
+    $('lyricPreviewContent').classList.remove('is-empty');
+    $('copyLyricPreview').disabled = true;
+    $('retryLyricPreview').dataset.jobId = jobId;
+    try {
+      const resp = await request(`/api/songs/download/lyric?id=${encodeURIComponent(jobId)}`);
+      lyricPreviewData = resp.data || {};
+      if (!lyricPreviewValue(lyricPreviewKind)) lyricPreviewKind = ['written', 'lyric', 'tlyric', 'lxlyric'].find(kind => lyricPreviewValue(kind)) || 'written';
+      renderLyricPreview();
+    } catch (error) {
+      $('lyricPreviewStatus').textContent = `读取失败：${error.message}`;
+      $('lyricPreviewContent').textContent = '无法读取这首歌曲的歌词数据。';
+      $('lyricPreviewContent').classList.add('is-empty');
+    }
+  }
+
+  $('closeLyricPreview').addEventListener('click', closeLyricPreview);
+  $('lyricPreviewModal').addEventListener('click', event => { if (event.target === $('lyricPreviewModal')) closeLyricPreview(); });
+  $('copyLyricPreview').addEventListener('click', () => {
+    const content = lyricPreviewValue(lyricPreviewKind);
+    if (content) copyText(content);
+  });
+  $('exportLyricPreview').addEventListener('click', () => {
+    const jobId = $('retryLyricPreview').dataset.jobId;
+    if (!jobId) return;
+    const url = withAccessToken(`${root}/api/songs/download/lyric/file?id=${encodeURIComponent(jobId)}`, getAuthToken());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  });
+  $('retryLyricPreview').addEventListener('click', async () => {
+    const button = $('retryLyricPreview');
+    const jobId = button.dataset.jobId;
+    if (!jobId) return;
+    setBusy(button, true, '正在获取');
+    try {
+      const resp = await request('/api/songs/download/lyric/retry', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: jobId }),
+      });
+      await loadDownloads();
+      await openLyricPreview(jobId);
+      toast(resp.data?.job?.lyric_status === 'completed' ? '歌词重新获取完成' : resp.data?.job?.lyric_message || '仍未找到可用歌词', 4200);
+    } catch (error) {
+      $('lyricPreviewStatus').innerHTML = `<strong>重新获取失败</strong><span>${escapeHtml(error.message)}</span>`;
+      toast(`歌词获取失败：${error.message}`, 5200);
+    } finally {
+      setBusy(button, false);
+    }
+  });
+
   function updateDownloadQueueControl() {
     const queue = state.downloadQueue || {};
     const queued = Array.isArray(queue.queued_ids) ? queue.queued_ids.length : 0;
@@ -2159,6 +2260,7 @@
       const cardTone = job.status === 'completed' ? 'success' : ['failed', 'interrupted'].includes(job.status) ? 'danger' : job.status === 'queued' ? 'neutral' : 'running';
       const secondaryDetails = `${details ? `<p>${details}</p>` : ''}${job.path ? `<p class="download-path" title="${escapeHtml(job.path)}">${escapeHtml(job.path)}</p>` : ''}`;
       const errorDiagnostic = job.error ? LxUI.diagnostic({ label: `查看失败诊断 · ${downloadFailureLabel(job.error_category)}`, summary: job.error_suggestion || '', raw: job.error }) : '';
+      const lyricText = downloadLyricText(job);
       return `<article class="download-item ui-status-card" data-tone="${cardTone}">
         <div class="download-main">
           <div class="download-title-row">
@@ -2174,12 +2276,16 @@
           </div>
           ${job.status_detail ? `<p class="download-stage-detail">${escapeHtml(job.status_detail)}</p>` : ''}
           ${job.source_fallback_message ? `<p class="download-source-fallback">${escapeHtml(job.source_fallback_message)}</p>` : ''}
+          ${lyricText ? `<p class="download-lyric-status status-${escapeHtml(job.lyric_status || 'pending')}">${escapeHtml(lyricText)}</p>` : ''}
+          ${job.lyric_error ? `<details class="download-lyric-error"><summary>查看歌词错误</summary><p>${escapeHtml(job.lyric_error)}</p></details>` : ''}
           ${errorDiagnostic}
           ${job.verification_message ? `<p class="${job.verification_status === 'passed' ? 'download-verification-passed' : 'download-verification-warning'}">${escapeHtml(job.verification_message)}</p>` : ''}
         </div>
         <div class="download-actions">
           ${queueIndex >= 0 ? `<button class="secondary mini-button" type="button" data-download-move="${escapeHtml(job.id)}" data-direction="up"${queueIndex === 0 ? ' disabled' : ''}>上移</button><button class="secondary mini-button" type="button" data-download-move="${escapeHtml(job.id)}" data-direction="down"${queueIndex === (state.downloadQueue.queued_ids.length - 1) ? ' disabled' : ''}>下移</button>` : ''}
           ${['failed', 'interrupted'].includes(job.status) && Number(job.song_id) > 0 ? `<button class="secondary" type="button" data-download-retry="${escapeHtml(job.id)}">重新下载</button>` : ''}
+          ${job.lyric_status && Number(job.song_id) > 0 ? `<button class="secondary" type="button" data-lyric-view="${escapeHtml(job.id)}">查看歌词</button>` : ''}
+          ${['not_found', 'failed'].includes(job.lyric_status) && Number(job.song_id) > 0 ? `<button class="secondary" type="button" data-lyric-retry="${escapeHtml(job.id)}">重新获取歌词</button>` : ''}
           ${job.path ? `<button class="secondary" type="button" data-download-copy="${escapeHtml(job.path)}">复制路径</button>` : ''}
           ${['pending', 'resolving', 'queued'].includes(job.status) && job.id !== state.downloadQueue?.current_job_id ? `<button class="danger-button" type="button" data-download-remove="${escapeHtml(job.id)}" data-download-remove-kind="cancel">取消任务</button>` : ''}
           ${['completed', 'failed', 'interrupted'].includes(job.status) ? `<button class="danger-button" type="button" data-download-remove="${escapeHtml(job.id)}" data-download-remove-kind="record">删除记录</button>` : ''}
@@ -2205,6 +2311,27 @@
         loadDownloads();
       } catch (error) { toast(error.message, 5200); }
     }));
+    list.querySelectorAll('[data-lyric-retry]').forEach(button => button.addEventListener('click', async () => {
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = '正在获取';
+      try {
+        const resp = await request('/api/songs/download/lyric/retry', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: button.dataset.lyricRetry }),
+        });
+        await loadDownloads();
+        const lyricStatus = resp.data?.job?.lyric_status;
+        toast(lyricStatus === 'completed' ? '歌词重新获取完成' : resp.data?.job?.lyric_message || '仍未找到可用歌词', 4200);
+      } catch (error) {
+        await loadDownloads();
+        toast(`歌词获取失败：${error.message}`, 5200);
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    }));
+    list.querySelectorAll('[data-lyric-view]').forEach(button => button.addEventListener('click', () => openLyricPreview(button.dataset.lyricView)));
     list.querySelectorAll('[data-download-remove]').forEach(button => button.addEventListener('click', async () => {
       try {
         const cancelling = button.dataset.downloadRemoveKind === 'cancel';
@@ -2428,7 +2555,6 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           song: item,
-          fetch_lyric: true,
           download_meta: probe ? {
             total_bytes: probe.total_bytes,
             actual_quality: probe.actual_quality || probe.requestedQuality,
@@ -3107,6 +3233,58 @@ curl -X POST "${endpoint}" \
       setBusy(button, false);
     }
   });
+
+  function renderLyricSettings(settings) {
+    $('lyricAutoFetch').checked = settings?.auto_fetch !== false;
+    $('lyricFallbackEnabled').checked = settings?.fallback_enabled !== false;
+    $('lyricTranslationMode').value = settings?.translation_mode || 'merge';
+    const interval = String(settings?.request_interval_ms || 600);
+    if (![...$('lyricRequestInterval').options].some(option => option.value === interval)) {
+      const option = document.createElement('option');
+      option.value = interval;
+      option.textContent = `${Number(interval) / 1000} 秒`;
+      $('lyricRequestInterval').appendChild(option);
+    }
+    $('lyricRequestInterval').value = interval;
+    const modeText = $('lyricTranslationMode').selectedOptions[0]?.textContent || '原文＋翻译';
+    $('lyricSettingsState').textContent = `已保存：${settings?.auto_fetch === false ? '手动获取' : '自动获取'} · ${settings?.fallback_enabled === false ? '仅原平台' : '允许跨平台补全'} · ${modeText}`;
+    $('lyricSettingsState').classList.remove('is-warning');
+  }
+
+  async function loadLyricSettings() {
+    try {
+      const resp = await request('/api/settings/lyrics');
+      renderLyricSettings(resp.data || {});
+    } catch (error) {
+      $('lyricSettingsState').textContent = `读取设置失败：${error.message}`;
+      $('lyricSettingsState').classList.add('is-warning');
+    }
+  }
+
+  $('saveLyricSettings').addEventListener('click', async () => {
+    const button = $('saveLyricSettings');
+    setBusy(button, true, '保存中');
+    try {
+      const resp = await request('/api/settings/lyrics', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auto_fetch: $('lyricAutoFetch').checked,
+          fallback_enabled: $('lyricFallbackEnabled').checked,
+          translation_mode: $('lyricTranslationMode').value,
+          request_interval_ms: Number($('lyricRequestInterval').value || 600),
+        }),
+      });
+      renderLyricSettings(resp.data || {});
+      toast('歌词设置已保存');
+    } catch (error) {
+      $('lyricSettingsState').textContent = `保存失败：${error.message}`;
+      $('lyricSettingsState').classList.add('is-warning');
+      toast(error.message, 5200);
+    } finally {
+      setBusy(button, false);
+    }
+  });
   $('quality').addEventListener('change', () => updateExternalExample($('quality').value));
   $('defaultQualitySetting').addEventListener('change', () => updateExternalExample($('defaultQualitySetting').value));
   $('allowAutoDowngrade').checked = allowAutoDowngrade();
@@ -3169,6 +3347,7 @@ curl -X POST "${endpoint}" \
   updatePlayerDock(null, '');
   loadStatus();
   loadPlaybackSettings();
+  loadLyricSettings();
   loadLxSyncSettings();
   loadDownloads();
   loadDownloadSettings();

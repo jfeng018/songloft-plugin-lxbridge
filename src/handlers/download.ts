@@ -11,10 +11,12 @@ import { probeAudio } from './direct';
 import { localAudioFileStatus } from '../download/filesystem';
 import { matchScore, searchAcross } from './search';
 import type { ResolvedUrl } from '../types';
+import type { ResolvedLyrics } from '../lyrics/resolver';
+import { getLyricSettings } from '../lyrics/settings';
+import { getDownloadLyricSnapshot, saveDownloadLyricSnapshot } from '../lyrics/downloadStore';
 
 interface DownloadRequest {
   song?: SearchSongItem;
-  fetch_lyric?: boolean;
   download_meta?: { total_bytes?: number | null; actual_quality?: string; content_type?: string };
   download_options?: Partial<DownloadPathSettings>;
   upgrade_meta?: { source_song_id?: number; source_bitrate?: number; target_quality?: string };
@@ -35,8 +37,33 @@ interface ResolvedDownloadItem {
   fallbackMessage: string;
 }
 
+interface LyricPreviewData {
+  job_id: string;
+  song_id: number;
+  title: string;
+  artist: string;
+  file_path: string;
+  status: string;
+  source: string;
+  fallback: boolean;
+  message: string;
+  written: string;
+  lyric: string;
+  tlyric: string;
+  lxlyric: string;
+}
+
 function isPlatform(value: unknown): value is PlatformId {
   return ['kw', 'kg', 'tx', 'wy', 'mg'].includes(String(value));
+}
+
+function parseSourceData(value: unknown): Record<string, any> | null {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, any> : null;
+  } catch {
+    return null;
+  }
 }
 
 const PLATFORM_NAMES: Record<PlatformId, string> = {
@@ -112,10 +139,40 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
   create: (req: HTTPRequest) => Promise<HTTPResponse>;
   createBatch: (req: HTTPRequest) => Promise<HTTPResponse>;
   status: (req: HTTPRequest) => Promise<HTTPResponse>;
+  lyric: (req: HTTPRequest) => Promise<HTTPResponse>;
+  lyricFile: (req: HTTPRequest) => Promise<HTTPResponse>;
   retry: (req: HTTPRequest) => Promise<HTTPResponse>;
+  retryLyric: (req: HTTPRequest) => Promise<HTTPResponse>;
   remove: (req: HTTPRequest) => Promise<HTTPResponse>;
   queue: (req: HTTPRequest) => Promise<HTTPResponse>;
 } {
+  async function loadLyricPreview(id: string): Promise<LyricPreviewData> {
+    if (!id) throw new Error('缺少下载任务 id');
+    const job = manager.get(id);
+    if (!job?.song_id) throw new Error('该任务还没有可查看的歌曲记录');
+    const snapshot = await getDownloadLyricSnapshot(id);
+    const song = await songloft.songs.getById(job.song_id) as unknown as Record<string, unknown> | null;
+    if (!song) throw new Error('歌曲记录不存在');
+    const sourceData = parseSourceData(song.source_data);
+    const lyrics = sourceData?.lyrics || {};
+    const stored = snapshot?.result;
+    return {
+      job_id: job.id,
+      song_id: job.song_id,
+      title: String(song.title || job.title || ''),
+      artist: String(song.artist || job.artist || ''),
+      file_path: String(song.file_path || job.path || ''),
+      status: job.lyric_status || stored?.status || lyrics.status || 'skipped',
+      source: job.lyric_source_id || stored?.source || lyrics.source || '',
+      fallback: stored?.fallback ?? Boolean(lyrics.fallback),
+      message: job.lyric_message || stored?.message || lyrics.message || '',
+      written: stored?.displayLyric || String(song.lyric || ''),
+      lyric: stored?.lyric || String(lyrics.lyric || ''),
+      tlyric: stored?.tlyric || String(lyrics.tlyric || ''),
+      lxlyric: stored?.lxlyric || String(lyrics.lxlyric || ''),
+    };
+  }
+
   return {
     create: async (req: HTTPRequest): Promise<HTTPResponse> => {
       try {
@@ -138,14 +195,17 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
         const upgradeSuffix = body.upgrade_meta?.source_song_id
           ? `:upgrade:${Number(body.upgrade_meta.source_song_id)}:${String(body.upgrade_meta.target_quality || 'quality')}`
           : '';
-        const created = await upsertSearchSongs([selectedSong], body.fetch_lyric !== false, upgradeSuffix);
+        const lyricSettings = await getLyricSettings();
+        const shouldFetchLyric = lyricSettings.auto_fetch;
+        let lyricResult: ResolvedLyrics | undefined;
+        const created = await upsertSearchSongs([selectedSong], shouldFetchLyric, upgradeSuffix, result => { lyricResult = result; });
         const record = created[0];
         if (!record?.id) throw new Error('写入 Songloft 歌曲库失败');
 
         let current = await songloft.songs.getById(record.id);
         if (!current) throw new Error('无法读取已导入的歌曲记录');
         if (current.type === 'local' && await localAudioFileStatus(current.file_path) === 'missing') {
-          const recovered = await upsertSearchSongs([selectedSong], body.fetch_lyric !== false, `${upgradeSuffix}:missing-file-recovery:${Date.now()}`);
+          const recovered = await upsertSearchSongs([selectedSong], lyricSettings.auto_fetch, `${upgradeSuffix}:missing-file-recovery:${Date.now()}`);
           current = recovered[0]?.id ? await songloft.songs.getById(recovered[0].id) : null;
           if (!current) throw new Error('本地文件已丢失，创建恢复下载记录失败');
         }
@@ -164,12 +224,20 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
         const job = manager.enqueue(current, {
           ...(body.download_meta || {}),
           source_id: String(selectedSong.source_data?.platform || '') || undefined,
+          lyric_status: lyricResult?.status || (shouldFetchLyric ? 'failed' : 'skipped'),
+          lyric_source_id: String(lyricResult?.source || '') || undefined,
+          lyric_message: lyricResult?.message,
+          lyric_error: lyricResult?.error,
           target_dir: selectedSettings.target_dir || undefined,
           path_template: selectedSettings.target_dir ? (body.upgrade_meta?.source_song_id ? '{title}-{artist}' : selectedSettings.path_template) : undefined,
           upgrade_source_song_id: Number(body.upgrade_meta?.source_song_id || 0) || undefined,
           upgrade_source_bitrate: Number(body.upgrade_meta?.source_bitrate || 0) || undefined,
           upgrade_target_quality: String(body.upgrade_meta?.target_quality || '') || undefined,
         });
+        if (lyricResult) {
+          try { await saveDownloadLyricSnapshot(job.id, current.id, selectedSong, lyricResult); }
+          catch (error) { songloft.log.warn(`保存歌词预览失败 ${job.title}: ${errorMessage(error)}`); }
+        }
         if (fallbackMessage) manager.setResolvedSource(job.id, String(selectedSong.source_data?.platform || ''), fallbackMessage);
         return ok({ job });
       } catch (error) {
@@ -189,9 +257,11 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
           path_template: selected.target_dir ? selected.path_template : undefined,
           client_key: String((song as SearchSongItem & { _download_client_key?: string })._download_client_key || '') || undefined,
           source_id: String(song.source_data?.platform || '') || undefined,
+          lyric_status: 'pending',
         }));
         const requestedQuality = String(body.quality || '320k');
         const allowDowngrade = body.allow_downgrade !== false;
+        const lyricSettings = await getLyricSettings();
         setTimeout(() => {
           void (async () => {
             for (let index = 0; index < body.songs!.length; index += 1) {
@@ -212,7 +282,12 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
                 sourceData.quality = resolved.actualQuality || quality;
                 sourceData.allow_downgrade = allowDowngrade;
                 manager.setStage(job.id, 'resolving', 28, '正在写入 Songloft 曲库');
-                const created = await upsertSearchSongs([resolvedItem], true);
+                if (lyricSettings.auto_fetch) manager.setLyricState(job.id, 'fetching', { message: '正在获取歌词' });
+                let lyricResult: ResolvedLyrics | undefined;
+                const created = await upsertSearchSongs([resolvedItem], lyricSettings.auto_fetch, '', result => {
+                  lyricResult = result;
+                  manager.setLyricState(job.id, result.status, result);
+                });
                 const record = created[0];
                 if (!record?.id) throw new Error('写入 Songloft 曲库失败');
                 let current = await songloft.songs.getById(record.id);
@@ -221,6 +296,10 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
                   const recovered = await upsertSearchSongs([resolvedItem], true, `:missing-file-recovery:${Date.now()}:${index}`);
                   current = recovered[0]?.id ? await songloft.songs.getById(recovered[0].id) : null;
                   if (!current) throw new Error('本地文件已丢失，创建恢复下载记录失败');
+                }
+                if (lyricResult) {
+                  try { await saveDownloadLyricSnapshot(job.id, current.id, resolvedItem, lyricResult); }
+                  catch (error) { songloft.log.warn(`保存歌词预览失败 ${job.title}: ${errorMessage(error)}`); }
                 }
                 manager.activate(job.id, current, {
                   total_bytes: probe.total_bytes,
@@ -246,12 +325,89 @@ export function downloadHandlers(manager: DownloadManager, runtimeManager: Runti
       return ok({ job });
     },
 
+    lyric: async (req: HTTPRequest): Promise<HTTPResponse> => {
+      try {
+        const id = parseQuery(req.query || '').id || '';
+        return ok(await loadLyricPreview(id));
+      } catch (error) {
+        return fail(errorMessage(error), 400);
+      }
+    },
+
+    lyricFile: async (req: HTTPRequest): Promise<HTTPResponse> => {
+      try {
+        const id = parseQuery(req.query || '').id || '';
+        const preview = await loadLyricPreview(id);
+        const content = preview.written || preview.lyric || preview.tlyric || preview.lxlyric;
+        if (!content) return fail('当前歌曲没有可导出的歌词', 404);
+        const pathName = preview.file_path.replace(/\\/g, '/').split('/').pop() || '';
+        const baseName = pathName.replace(/\.[^.]+$/, '') || `${preview.title}${preview.artist ? `-${preview.artist}` : ''}` || 'lyrics';
+        const safeName = `${baseName.replace(/[\\/:*?"<>|\r\n]+/g, '_').trim() || 'lyrics'}.lrc`;
+        return {
+          statusCode: 200,
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Content-Disposition': `attachment; filename="lyrics.lrc"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
+            'Cache-Control': 'no-store',
+          },
+          body: `\uFEFF${content}`,
+        };
+      } catch (error) {
+        return fail(errorMessage(error), 400);
+      }
+    },
+
     retry: async (req: HTTPRequest): Promise<HTTPResponse> => {
       try {
         const body = parseJSONBody<{ id?: string }>(req);
         if (!body.id) throw new Error('缺少下载任务 id');
         return ok({ job: manager.retry(body.id) });
       } catch (error) {
+        return fail(errorMessage(error), 400);
+      }
+    },
+
+    retryLyric: async (req: HTTPRequest): Promise<HTTPResponse> => {
+      let jobId = '';
+      try {
+        const body = parseJSONBody<{ id?: string }>(req);
+        jobId = String(body.id || '');
+        if (!jobId) throw new Error('缺少下载任务 id');
+        const job = manager.get(jobId);
+        if (!job?.song_id) throw new Error('该任务还没有可用于获取歌词的歌曲记录');
+        const snapshot = await getDownloadLyricSnapshot(jobId);
+        const song = await songloft.songs.getById(job.song_id) as unknown as Record<string, unknown> | null;
+        if (!song) throw new Error('歌曲记录不存在');
+        const sourceData = parseSourceData(song.source_data);
+        let item = snapshot?.item as SearchSongItem | undefined;
+        if (!item?.source_data?.songInfo) {
+          if (sourceData?.songInfo) {
+            item = {
+              title: String(song.title || job.title || ''), artist: String(song.artist || job.artist || ''),
+              album: String(song.album || ''), duration: Number(song.duration || 0), cover_url: String(song.cover_url || ''),
+              source_data: sourceData,
+            };
+          } else {
+            const title = String(song.title || job.title || '');
+            const artist = String(song.artist || job.artist || '');
+            const duration = Number(song.duration || 0) || undefined;
+            item = (await searchAcross(`${title} ${artist}`.trim(), 1, 10, '128k'))
+              .map(candidate => ({ candidate, score: matchScore(candidate, title, artist, duration) }))
+              .filter(entry => entry.score >= 130)
+              .sort((a, b) => b.score - a.score)[0]?.candidate;
+            if (!item) throw new Error('未找到歌名、歌手和时长均安全匹配的歌词来源');
+          }
+        }
+        manager.setLyricState(jobId, 'fetching', { message: '正在重新获取歌词' });
+        let lyricResult: ResolvedLyrics | undefined;
+        await upsertSearchSongs([item], true, '', result => {
+          lyricResult = result;
+          manager.setLyricState(jobId, result.status, result);
+        });
+        if (lyricResult) await saveDownloadLyricSnapshot(jobId, job.song_id, item, lyricResult);
+        return ok({ job: manager.get(jobId) });
+      } catch (error) {
+        if (jobId && manager.get(jobId)) manager.setLyricState(jobId, 'failed', { message: '重新获取歌词失败', error: errorMessage(error) });
         return fail(errorMessage(error), 400);
       }
     },

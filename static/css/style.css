@@ -570,7 +570,8 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
 
 .toast {
   position: fixed;
-  z-index: 50;
+  /* 提示必须高于 modal-overlay（80），否则弹窗内操作反馈会被遮罩挡住。 */
+  z-index: 120;
   left: 50%;
   bottom: max(28px, env(safe-area-inset-bottom));
   max-width: min(90vw, 620px);
@@ -713,12 +714,37 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
 .playback-settings-row { grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(210px, .8fr)) auto; }
 .playback-settings-row > .setting-select-card,
 .playback-settings-row > .check-card { height: 92px; min-height: 92px; box-sizing: border-box; }
+.lyric-settings-row { display: grid; grid-template-columns: repeat(2, minmax(210px, 1fr)) repeat(2, minmax(170px, .72fr)) auto; gap: 14px; align-items: end; }
+.lyric-settings-row > .setting-select-card,
+.lyric-settings-row > .check-card { height: 92px; min-height: 92px; box-sizing: border-box; }
 .settings-save { min-width: 92px; }
 .download-directory-row { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 14px; align-items: end; }
 .download-directory-help { display: block; margin-top: 7px; }
 .download-path-options { display: grid; grid-template-columns: minmax(220px, 1.3fr) minmax(180px, .7fr); gap: 14px; margin: 16px 0; }
 .download-path-options .check-card:last-child { grid-column: 1 / -1; }
 .download-source-fallback { margin: 7px 0 0; color: var(--primary); font-size: 12px; font-weight: 700; }
+.download-lyric-status { margin: 7px 0 0; color: var(--muted-strong); font-size: 12px; }
+.download-lyric-status.status-completed { color: var(--green); }
+.download-lyric-status.status-not_found, .download-lyric-status.status-failed { color: var(--warning); }
+.download-lyric-error { margin-top: 7px; color: var(--muted); font-size: 11px; }
+.download-lyric-error summary { cursor: pointer; }
+.download-lyric-error p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.lyric-preview-card { width: min(820px, 100%); }
+.lyric-preview-status { margin-bottom: 12px; padding: 11px 13px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-soft); color: var(--text-soft); font-size: 12px; line-height: 1.6; }
+.lyric-preview-status strong { display: block; color: var(--text); font-size: 14px; }
+.lyric-preview-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.lyric-preview-tabs button { min-height: 36px; padding: 0 13px; }
+.lyric-preview-tabs button.is-active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
+.lyric-preview-content { min-height: 280px; max-height: min(52vh, 520px); margin: 0; padding: 15px; overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-raised); color: var(--text-soft); font: 12px/1.85 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lyric-preview-content.is-empty { display: grid; place-items: center; color: var(--muted); font-family: inherit; }
+.lyric-preview-actions { justify-content: space-between; }
+.lyric-preview-export-actions { flex-wrap: wrap; }
+.lyric-export-note { margin: 9px 0 0; font-size: 11px; line-height: 1.6; }
+@media (max-width: 720px) {
+  .lyric-preview-content { min-height: 240px; max-height: 48vh; }
+  .lyric-preview-actions, .lyric-preview-export-actions { width: 100%; }
+  .lyric-preview-actions > button, .lyric-preview-export-actions > button { flex: 1 1 120px; }
+}
 .download-favorites { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 12px; align-items: end; margin-bottom: 10px; }
 .favorite-directory-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
 .favorite-directory-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-soft); color: var(--text-soft); font-size: 12px; }
@@ -1001,7 +1027,9 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
 
 @media (max-width: 720px) {
   .playback-settings-row > .setting-select-card,
-  .playback-settings-row > .check-card { height: auto; min-height: 82px; }
+  .playback-settings-row > .check-card,
+  .lyric-settings-row > .setting-select-card,
+  .lyric-settings-row > .check-card { height: auto; min-height: 82px; }
   #tab-upgrade .section-heading.row.between { align-items: stretch; flex-direction: column; }
   .upgrade-heading-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
   .upgrade-batch-toolbar { grid-template-columns: 1fr 1fr; }
@@ -1048,6 +1076,7 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
   .result-actions { justify-content: flex-start; }
   .settings-inline-row,
   .playback-settings-row,
+  .lyric-settings-row,
   .download-directory-row,
   .download-path-options,
   .download-favorites,
@@ -1242,11 +1271,11 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
   color: var(--muted-strong);
   font-size: 12px;
 }
-.import-options-three {
-  grid-template-columns: minmax(210px, 1fr) minmax(180px, .75fr) minmax(210px, .75fr) auto;
+.import-options-library {
+  grid-template-columns: minmax(240px, 1fr) minmax(220px, .8fr) auto;
   align-items: end;
 }
-.import-options-three > .import-setting-card { height: 92px; min-height: 92px; box-sizing: border-box; }
+.import-options-library > .import-setting-card { height: 92px; min-height: 92px; box-sizing: border-box; }
 .setting-select-card.import-setting-card { gap: 4px; }
 .import-setting-card .field-help { margin-top: 0; line-height: 1.35; }
 .import-setting-card input[type="text"] { min-height: 28px; padding: 2px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
@@ -1329,8 +1358,8 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
     min-width: 0;
     flex: 0 1 auto;
   }
-  .import-options-three { grid-template-columns: 1fr; }
-  .import-options-three > .import-setting-card { height: auto; min-height: 92px; }
+  .import-options-library { grid-template-columns: 1fr; }
+  .import-options-library > .import-setting-card { height: auto; min-height: 92px; }
   .import-inline-actions { min-width: 0; align-self: auto; justify-content: stretch; }
   .import-inline-actions button { flex: 1 1 0; min-width: 0; }
 }
@@ -1774,6 +1803,7 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
   .card,
   .settings-stack,
   .settings-inline-row > *,
+  .lyric-settings-row > *,
   .download-directory-row > *,
   .download-path-options > *,
   .download-favorites > * {
@@ -1799,6 +1829,7 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
   .section-heading.row.between > .row button { flex: 1 1 auto; min-width: 0; }
 
   .settings-inline-row .settings-save,
+  .lyric-settings-row .settings-save,
   .settings-card-actions,
   .settings-card-actions button,
   .download-directory-row > button,
